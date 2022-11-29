@@ -1,0 +1,9 @@
+# Configuration file for donder-release
+
+tag_prefix: v
+types:
+  - { commit_type: perf, bump: patch, section: Performance Improvements }
+  - { commit_type: ci, bump: patch, section: CI }
+bump_files:
+  - { target: cargo, path: Cargo.toml, build_metadata: false }
+  - { target: npm, path: package.json, build_metadata: false }
