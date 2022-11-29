@@ -1,6 +1,6 @@
 [package]
 name = "donder-release"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Bruno Morgado <bruno@cloudoki.com>"]
 edition = "2021"
 
