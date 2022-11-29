@@ -2,6 +2,8 @@
 name = "donder-release"
 version = "1.0.1"
 authors = ["Bruno Morgado <bruno@cloudoki.com>"]
+description = "Quickly create releases on Github from the command line or CI using conventional commits."
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
