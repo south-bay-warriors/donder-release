@@ -1,6 +1,6 @@
 {
   "name": "donder-release",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Quickly create releases on Github from the command line or CI using conventional commits.",
   "main": "start.js",
   "directories": {
