@@ -9,8 +9,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "node ./pre-install.js",
-    "uninstall": "node ./uninstall.js",
-    "publish": "rust-to-npm deploy -b"
+    "uninstall": "node ./uninstall.js"
   },
   "keywords": [],
   "author": "Bruno Morgado <bruno@cloudoki.com>",
@@ -23,3 +22,4 @@
     "LICENSE"
   ]
 }
+    
