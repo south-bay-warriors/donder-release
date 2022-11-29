@@ -67,7 +67,7 @@ const getPlatformMetadata = () => {
 const getBinary = () => {
   const platformMetadata = getPlatformMetadata();
   // the url for this binary is constructed from values in `package.json`
-  // https://github.com/mstrk/donder-release/releases/download/v1.0.3/donder-release_v1.0.3_x86_64-apple-darwin.zip
+  // https://github.com/cloudoki/donder-release/releases/download/v1.0.3/donder-release_v1.0.3_x86_64-apple-darwin.zip
   const url = `${repository.url}/releases/download/v${version}/${name}_v${version}_${platformMetadata.RUST_TARGET}.tar.gz`;
   return new Binary(platformMetadata.BINARY_NAME, url);
 };

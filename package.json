@@ -4,7 +4,7 @@
   "description": "Quickly create releases on Github from the command line or CI using conventional commits.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mstrk/donder-release"
+    "url": "https://github.com/cloudoki/donder-release"
   },
   "bin": "./npm/run.js",
   "scripts": {
