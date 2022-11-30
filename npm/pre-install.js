@@ -25,17 +25,25 @@ if (fs.existsSync(cargoDir)) {
     }
   );
 }
-    
-const features = process.env.npm_config_features ? `--features ${process.env.npm_config_features.replace(",", " ")}` : ""; 
 
-console.log(`Installing and compiling donder-release 1.0.2 ${features} ...`);
-exec(`cargo install donder-release --vers 1.0.2 ${features}`, (error, stdout, stderr) => {
-  console.log(stdout);
-  if (error || stderr) {
-    console.log(error || stderr);
-  } else {
-    console.log("install finished!");
+const features = process.env.npm_config_features
+  ? `--features ${process.env.npm_config_features.replace(",", " ")}`
+  : "";
+const version = process.env.npm_config_version
+  ? process.env.npm_config_version
+  : require("../package.json").version;
+
+console.log(
+  `Installing and compiling donder-release ${version} ${features} ...`
+);
+exec(
+  `cargo install donder-release --vers ${version} ${features}`,
+  (error, stdout, stderr) => {
+    console.log(stdout);
+    if (error || stderr) {
+      console.log(error || stderr);
+    } else {
+      console.log("install finished!");
+    }
   }
-});
-
-    
+);

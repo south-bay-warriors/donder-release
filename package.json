@@ -2,24 +2,21 @@
   "name": "donder-release",
   "version": "1.0.2",
   "description": "Quickly create releases on Github from the command line or CI using conventional commits.",
-  "main": "start.js",
-  "directories": {
-    "test": "tests"
+  "author": "Bruno Morgado <bruno@cloudoki.com>",
+  "license": "MIT",
+  "main": "npm/start.js",
+  "bin": {
+    "donder-release": "npm/start.js"
   },
+  "files": [
+    "npm/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "node ./pre-install.js",
-    "uninstall": "node ./uninstall.js"
-  },
-  "keywords": [],
-  "author": "Bruno Morgado <bruno@cloudoki.com>",
-  "license": "MIT",
-  "files": [
-    "pre-install.js",
-    "start.js",
-    "uninstall.js",
-    "README.md",
-    "LICENSE"
-  ]
+    "uninstall": "node ./uninstall.js",
+    "publish": "cargo publish && npm publish"
+  }
 }
-    

@@ -2,8 +2,13 @@
 
 const { exec } = require("child_process");
 
-const controller = typeof AbortController !== "undefined" ? new AbortController() : { abort: () => {} };
+const controller =
+  typeof AbortController !== "undefined"
+    ? new AbortController()
+    : { abort: () => {} };
 const { signal } = controller;
+
+console.log("Starting...");
 
 exec("donder-release", { signal }, (error, stdout, stderr) => {
   stdout && console.log(stdout);
@@ -16,4 +21,3 @@ exec("donder-release", { signal }, (error, stdout, stderr) => {
 process.on("SIGTERM", () => {
   controller.abort();
 });
-    

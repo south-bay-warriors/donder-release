@@ -25,7 +25,7 @@ if (fs.existsSync(cargoDir)) {
     }
   );
 }
-    
+
 const binp = path.join(cargoDir, "bin", "donder-release");
 
 if (fs.existsSync(binp)) {
@@ -39,5 +39,3 @@ if (fs.existsSync(binp)) {
 } else {
   console.log("donder-release not found skipping!");
 }
-    
-    
