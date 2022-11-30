@@ -21,7 +21,7 @@ donder-release --help
 See CLI options:
 
 ```bash
-npx donder-release --help
+npx donder-release@latest --help
 ```
 
 #### TODO
