@@ -8,15 +8,19 @@ const controller =
     : { abort: () => {} };
 const { signal } = controller;
 
-console.log("Starting...");
+const [, , ...args] = process.argv;
 
-exec("donder-release", { signal }, (error, stdout, stderr) => {
-  stdout && console.log(stdout);
-  stderr && console.error(stderr);
-  if (error !== null) {
-    console.log(`exec error: ${error}`);
+exec(
+  `donder-release ${args.join(" ")}`,
+  { signal },
+  (error, stdout, stderr) => {
+    stdout && console.log(stdout);
+    stderr && console.error(stderr);
+    if (error !== null) {
+      console.log(`exec error: ${error}`);
+    }
   }
-});
+);
 
 process.on("SIGTERM", () => {
   controller.abort();
