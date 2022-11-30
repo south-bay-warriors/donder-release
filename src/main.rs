@@ -42,13 +42,21 @@ struct Cli {
     /// Preview a pending release without publishing it
     #[arg(long, default_value = "false")]
     dry_run: bool,
+    /// Outputs the CLI version
+    #[arg(long, short, default_value = "false")]
+    version: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
-    // Generate configuration file option
+    if args.version {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    // Output CLI version
     if args.init {
         ctx::init_config().unwrap_or_else(|e| {
             logError!("Initializing config - {}", e.to_string());
