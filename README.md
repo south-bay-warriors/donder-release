@@ -12,8 +12,6 @@ cargo install donder-release
 
 #### With Npm
 
-See CLI options:
-
 ```bash
 npm install -g donder-release-cli
 ```
