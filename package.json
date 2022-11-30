@@ -1,6 +1,6 @@
 {
   "name": "donder-release",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Quickly create releases on Github from the command line or CI using conventional commits.",
   "author": "Bruno Morgado <bruno@cloudoki.com>",
   "license": "MIT",
