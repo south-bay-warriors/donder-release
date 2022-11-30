@@ -2,7 +2,7 @@
 
 Quickly create releases on Github from the command line or CI using conventional commits.
 
-## Usage
+## Installation
 
 #### With Cargo
 
@@ -10,18 +10,20 @@ Quickly create releases on Github from the command line or CI using conventional
 cargo install donder-release
 ```
 
-See CLI options:
-
-```bash
-donder-release --help
-```
-
 #### With Npm
 
 See CLI options:
 
 ```bash
-npx donder-release@latest --help
+npm install -g donder-release-cli
+```
+
+## Usage
+
+See CLI options:
+
+```bash
+donder-release --help
 ```
 
 #### TODO
