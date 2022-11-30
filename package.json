@@ -6,7 +6,7 @@
   "license": "MIT",
   "main": "npm/start.js",
   "bin": {
-    "donder-release": "npm/start.js"
+    "donder-release-cli": "npm/start.js"
   },
   "files": [
     "npm/**/*",
