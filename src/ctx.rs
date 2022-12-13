@@ -227,11 +227,11 @@ impl Ctx {
             } else {
                 packages.get_mut("root").unwrap().bump_files.push(bump_file.clone());
             }
+        }
 
-            // Remove root package if it has no bump files
-            if packages.get("root").unwrap().bump_files.is_empty() {
-                packages.remove("root");
-            }
+        // Remove root package if it has no bump files
+        if packages.get("root").unwrap().bump_files.is_empty() {
+            packages.remove("root");
         }
 
         let token = std::env::var("GH_TOKEN").context("GH_TOKEN env var not set")?;
