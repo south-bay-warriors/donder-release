@@ -35,4 +35,3 @@ donder-release --help
 - Add tests
 - Add CI
 - Add support to other git providers(?)
-- Add support for mono-repos(?)
