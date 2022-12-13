@@ -23,6 +23,7 @@ mod git;
 mod api;
 mod changelog;
 mod bump_files;
+mod package;
 
 use ctx::Ctx;
 
@@ -66,7 +67,7 @@ async fn main() -> Result<()> {
     }
 
     // Load configuration file into context
-    let mut ctx = Ctx::new(args.config, args.pre_id, args.dry_run)
+    let ctx = Ctx::new(args.config, args.pre_id, args.dry_run)
         .unwrap_or_else(|e| {
             logError!("Loading configuration - {}", e.to_string());
             process::exit(1);
@@ -84,58 +85,66 @@ async fn main() -> Result<()> {
         false => logInfo!("Running in publish mode, release will be published"),
     }
 
-    // Get last release info
-    ctx.last_release().unwrap_or_else(|e| {
-        logError!("Getting last release - {}", e.to_string());
-        process::exit(1);
-    });
+    for mut pkg in ctx.packages {
+        if !pkg.name.is_empty() {
+            logInfo!("Processing package {}", pkg.name);
+        }
 
-    // Get commits
-    ctx.get_commits().unwrap_or_else(|e| {
-        logError!("Getting commits - {}", e.to_string());
-        process::exit(1);
-    });
-
-    
-    // Generate changelog
-    let has_changelog = ctx.load_changelog()
-        .unwrap_or_else(|e| {
-            logError!("Generating changelog - {}", e.to_string());
+        // Get last release info
+        pkg.last_release(&ctx.git, &ctx.pre_id).unwrap_or_else(|e| {
+            logError!("Getting last release - {}", e.to_string());
             process::exit(1);
         });
 
-    if has_changelog {
-        // Write release notes
-        ctx.write_notes()
+        // Get commits
+        pkg.get_commits(&ctx.git).unwrap_or_else(|e| {
+            logError!("Getting commits - {}", e.to_string());
+            process::exit(1);
+        });
+
+        
+        // Generate changelog
+        let has_changelog = pkg.load_changelog(&ctx.pre_id, &ctx.types)
             .unwrap_or_else(|e| {
-                logError!("Writing release notes - {}", e.to_string());
+                logError!("Generating changelog - {}", e.to_string());
                 process::exit(1);
             });
-    
-        // Publish or preview release
-        match ctx.preview {
-            true => {
-                logInfo!("Previewing release");
-                
-                for line in ctx.changelog.notes.lines() {
-                    println!("{}", line);
+
+        if has_changelog {
+            // Write release notes
+            pkg.write_notes(&ctx.preview, &ctx.git, &ctx.types, &ctx.changelog_file)
+                .unwrap_or_else(|e| {
+                    logError!("Writing release notes - {}", e.to_string());
+                    process::exit(1);
+                });
+        
+            // Publish or preview release
+            match ctx.preview {
+                true => {
+                    logInfo!("Previewing release");
+                    
+                    for line in pkg.changelog.notes.lines() {
+                        println!("{}", line);
+                    }
+
+                    println!();
+                },
+                false => {
+                    // Bump files
+                    pkg.bump_files()
+                        .unwrap_or_else(|e| {
+                            logError!("Bumping files - {}", e.to_string());
+                            process::exit(1);
+                        });
+        
+                    // Publish release
+                    pkg.publish_release(&ctx.git, &ctx.api, &ctx.release_message)
+                        .await
+                        .unwrap_or_else(|e| {
+                            logError!("Publishing release - {}", e.to_string());
+                            process::exit(1);
+                        });
                 }
-            },
-            false => {
-                // Bump files
-                ctx.bump_files()
-                    .unwrap_or_else(|e| {
-                        logError!("Bumping files - {}", e.to_string());
-                        process::exit(1);
-                    });
-    
-                // Publish release
-                ctx.publish_release()
-                    .await
-                    .unwrap_or_else(|e| {
-                        logError!("Publishing release - {}", e.to_string());
-                        process::exit(1);
-                    });
             }
         }
     }

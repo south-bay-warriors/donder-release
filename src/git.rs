@@ -109,17 +109,29 @@ impl Git {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    pub fn get_commits(&self, tag_head: &str) -> Result<Vec<Commit>> {
+    pub fn get_commits(&self, tag_head: &str, package_path: &str) -> Result<Vec<Commit>> {
         // get commits between tag_head and HEAD
         let output = match tag_head.is_empty() {
-            true => Command::new("git")
-                .args(["log", "--pretty=format:\"%h|||%s|||%b\""])
-                .output()
-                .expect("[get_commits] failed to fetch"),
-            false => Command::new("git")
-                .args(["log", "--pretty=format:\"%h|||%s|||%b\"", format!("{}..HEAD", tag_head).as_str()])
-                .output()
-                .expect("[get_commits] failed to fetch"),
+            true => match package_path.is_empty() {
+                true => Command::new("git")
+                    .args(["log", "--pretty=format:\"%h|||%s|||%b\""])
+                    .output()
+                    .expect("[get_commits] failed to fetch"),
+                false => Command::new("git")
+                    .args(["log", "--pretty=format:\"%h|||%s|||%b\"", package_path])
+                    .output()
+                    .expect("[get_commits] failed to fetch"),
+            },
+            false => match package_path.is_empty() {
+                true => Command::new("git")
+                    .args(["log", "--pretty=format:\"%h|||%s|||%b\"", &format!("{}..HEAD", tag_head)])
+                    .output()
+                    .expect("[get_commits] failed to fetch"),
+                false => Command::new("git")
+                    .args(["log", "--pretty=format:\"%h|||%s|||%b\"", &format!("{}..HEAD", tag_head), "--", package_path])
+                    .output()
+                    .expect("[get_commits] failed to fetch"),
+            }
         };
 
         let output = String::from_utf8_lossy(&output.stdout).to_string();
