@@ -37,6 +37,9 @@ struct Cli {
     /// Configuration file path
     #[arg(long, short, default_value = "donder-release.yaml")]
     config: String,
+    /// If you have a monorepo and want to release a specific package
+    #[arg(long, short, required = false, value_delimiter = ',')]
+    packages: Vec<String>,
     /// Release optional pre ID (e.g: alpha, beta, rc)
     #[arg(long, default_value = "")]
     pre_id: String,
@@ -67,7 +70,7 @@ async fn main() -> Result<()> {
     }
 
     // Load configuration file into context
-    let ctx = Ctx::new(args.config, args.pre_id, args.dry_run)
+    let ctx = Ctx::new(args.config, args.pre_id, args.dry_run, args.packages)
         .unwrap_or_else(|e| {
             logError!("Loading configuration - {}", e.to_string());
             process::exit(1);

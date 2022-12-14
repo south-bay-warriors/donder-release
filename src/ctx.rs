@@ -111,7 +111,7 @@ fn default_include_authors() -> bool {
 }
 
 impl Ctx {
-    pub fn new(config: String, pre_id: String, preview: bool) -> Result<Self> {
+    pub fn new(config: String, pre_id: String, preview: bool, selected_packages: Vec<String>) -> Result<Self> {
         let config_path = path::PathBuf::from(config);
         let file = fs::File::open(config_path).expect("could not open file");
         let input_config: Ctx = serde_yaml::from_reader(file)
@@ -234,12 +234,26 @@ impl Ctx {
             packages.remove("root");
         }
 
+        let mut collected_packages: Vec<Pkg> = packages.into_iter().map(|(_, v)| v).collect();
+
+        // If selected packages are provided, filter out the rest
+        if !selected_packages.is_empty() {
+            collected_packages = collected_packages.into_iter().filter(|pkg| {
+                selected_packages.contains(&pkg.name)
+            }).collect();
+        }
+        
+        // If no packages are left, bail
+        if collected_packages.is_empty() {
+            bail!("no packages to release make sure you have selected packages defined in your config file");
+        }
+
         let token = std::env::var("GH_TOKEN").context("GH_TOKEN env var not set")?;
 
         let git_api = Git::new(
             &token,
             &std::env::var("GIT_AUTHOR_NAME").unwrap_or("cloudoki-deploy".to_string()),
-            &std::env::var("GIT_AUTHOR_EMAIL").unwrap_or("general@cloudoki.com".to_string()),
+            &std::env::var("GIT_AUTHOR_EMAIL").unwrap_or("opensource@cloudoki.com".to_string()),
         ).context("failed to create git api")?;
 
         let github_api = GithubApi::new(
@@ -255,7 +269,7 @@ impl Ctx {
                 git: git_api,
                 api: github_api,
                 types: default_types,
-                packages: packages.into_iter().map(|(_, v)| v).collect(),
+                packages: collected_packages,
                 ..input_config
             }
         )
