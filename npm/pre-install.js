@@ -4,13 +4,13 @@ const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
 
-const cargoDir = path.dirname("$HOME" + ".cargo");
+const homeDir =
+  process.env.HOME || process.env.USERPROFILE || process.env.HOMEPATH;
+const cargoDir = path.join(homeDir, ".cargo");
 
 // check if directory exists
-if (fs.existsSync(cargoDir)) {
-  //   console.log("Cargo found.");
-} else {
-  const setCargo = 'PATH="/$HOME/.cargo/bin:${PATH}"';
+if (!fs.existsSync(cargoDir)) {
+  const setCargo = 'PATH="/$HOME/.cargo/bin:$PATH"';
   console.log("Installing deps [cargo].");
 
   exec(
