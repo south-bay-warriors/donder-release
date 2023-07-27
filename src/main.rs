@@ -60,6 +60,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Load environment variables from the .env file
+    dotenv::from_filename("donder-release.env").ok();
+
     // Output CLI version
     if args.init {
         ctx::init_config().unwrap_or_else(|e| {
