@@ -2,7 +2,15 @@
   "name": "donder-release-cli",
   "version": "1.3.0",
   "description": "Quickly create releases on Github from the command line or CI using conventional commits.",
-  "author": "Bruno Morgado <bruno@cloudoki.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/south-bay-warriors/donder-release"
+  },
+  "bugs": {
+    "url": "https://github.com/south-bay-warriors/donder-release/issues",
+    "email": "support@southbaywarriors.com"
+  },
+  "author": "Bruno Morgado <bruno@southbaywarriors.com>",
   "license": "MIT",
   "main": "npm/start.js",
   "bin": {

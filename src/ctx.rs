@@ -252,8 +252,8 @@ impl Ctx {
 
         let git_api = Git::new(
             &token,
-            &std::env::var("GIT_AUTHOR_NAME").unwrap_or("cloudoki-deploy".to_string()),
-            &std::env::var("GIT_AUTHOR_EMAIL").unwrap_or("opensource@cloudoki.com".to_string()),
+            &std::env::var("GIT_AUTHOR_NAME").unwrap_or("sbayw-bot".to_string()),
+            &std::env::var("GIT_AUTHOR_EMAIL").unwrap_or("support@southbaywarriors.com".to_string()),
         ).context("failed to create git api")?;
 
         let github_api = GithubApi::new(
