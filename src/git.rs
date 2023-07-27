@@ -53,16 +53,22 @@ impl Git {
         }
 
         // pull changes from remote
-        Command::new("git")
+        let output = Command::new("git")
             .args(["pull", &self.repo_url])
-            .output()
-            .expect("[sync] failed to fetch all");
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to pull changes");
+        }
 
         // fetch tags from remote
-        Command::new("git")
+        let output = Command::new("git")
             .args(["fetch", "--prune", "--prune-tags", &self.repo_url])
-            .output()
-            .expect("[get_tags] failed to fetch tags");
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to fetch tags");
+        }
 
         Ok(())
     }
@@ -77,8 +83,11 @@ impl Git {
     pub fn get_tags(&self, prefix: &str) -> Result<Vec<ReleaseInfo>> {
         let output = Command::new("git")
             .args(["tag", "-l"])
-            .output()
-            .expect("[get_tags] failed to fetch");
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to get tags");
+        }
             
         let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
@@ -103,8 +112,11 @@ impl Git {
     pub fn tag_head(&self, tag: &str) -> Result<String> {
         let output = Command::new("git")
             .args(["rev-list", "-1", tag])
-            .output()
-            .expect("[tag_head] failed to fetch");
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to get tag head");
+        }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
@@ -152,24 +164,33 @@ impl Git {
     }
 
     pub fn tag(&self, tag: &str) -> Result<()> {
-        Command::new("git")
+        let output = Command::new("git")
             .args(["tag", "-a", tag, "-m", tag])
-            .output()
-            .expect("[tag] failed to fetch");
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to tag");
+        }
 
         Ok(())
     }
 
     pub fn commit(&self, message: &str) -> Result<()> {
-        Command::new("git")
+        let output = Command::new("git")
             .args(["add", "--all",])
-            .output()
-            .expect("[commit] failed to add");
+            .output()?;
 
-        Command::new("git")
+        if !output.status.success() {
+            bail!("failed to add changes");
+        }
+
+        let output = Command::new("git")
             .args(["commit", &format!("--author=\"{} <{}>\"", self.author, self.email), "-m", message])
-            .output()
-            .expect("[commit] failed to commit");
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to commit changes");
+        }
 
         Ok(())
     }
@@ -180,11 +201,8 @@ impl Git {
             .args(["push", &format!("--repo={}", &self.repo_url.as_str())])
             .output()?;
 
-        let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        println!("output: {}", output);
-
         // check if push was successful
-        if !output.contains("Everything up-to-date") {
+        if !output.status.success() {
             self.undo_commit()?;
             bail!("failed to push changes token may be invalid");
         }
@@ -198,11 +216,8 @@ impl Git {
             .args(["push", &format!("--repo={}", &self.repo_url.as_str()), "origin", tag])
             .output()?;
 
-        let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        println!("output: {}", output);
-
         // check if push was successful
-        if !output.contains("[new tag]") {
+        if !output.status.success() {
             self.undo_tag(tag)?;
             bail!("failed to push tag");
         }
@@ -212,18 +227,26 @@ impl Git {
 
     // undo last tag
     pub fn undo_tag(&self, tag: &str) -> Result<()> {
-        Command::new("git")
+        let output = Command::new("git")
             .args(["tag", "-d", tag])
             .output()?;
+
+        if !output.status.success() {
+            bail!("failed to delete tag");
+        }
 
         Ok(())
     }
 
     // undo last commit and changes
     pub fn undo_commit(&self) -> Result<()> {
-        Command::new("git")
+        let output = Command::new("git")
             .args(["reset", "--hard", "HEAD^"])
             .output()?;
+
+        if !output.status.success() {
+            bail!("failed to undo commit");
+        }
 
         Ok(())
     }
