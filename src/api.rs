@@ -1,5 +1,5 @@
 use anyhow::Result;
-use reqwest::{header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT}};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use serde::Serialize;
 use semver::Version;
 
