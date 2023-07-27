@@ -359,24 +359,21 @@ impl Pkg {
 
         // Release commit
         git
-            .commit(release_message.replace("%s", &self.changelog.next_release_version).as_str())
-            .context("failed to commit release")?;
-
-        // Release tag
-        git.tag(&self.changelog.next_release_version)
-            .context("failed to tag release")?;
+            .commit(release_message.replace("%s", &self.changelog.next_release_version).as_str())?;
 
         // Push to remote
-        git.push_with_tags()
-            .context("failed to push release tag")?;
-        
+        git.push()?;
+
+        // Release tag
+        git.tag(&self.changelog.next_release_version)?;
+        git.push_tag(&self.changelog.next_release_version)?;
+
         // Create release on GitHub
         api.publish_release(
             &self.changelog.next_release_version,
             &self.tag_prefix,
             &self.changelog.notes)
-            .await
-            .context("failed to publish release")?;
+            .await?;
 
         Ok(())
     }

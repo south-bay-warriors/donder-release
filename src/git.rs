@@ -160,15 +160,6 @@ impl Git {
         Ok(())
     }
 
-    pub fn push_with_tags(&self) -> Result<()> {
-        Command::new("git")
-            .args(["push", "--follow-tags", &format!("--repo={}", &self.repo_url.as_str())])
-            .output()
-            .expect("[push_with_tags] failed to fetch");
-
-        Ok(())
-    }
-
     pub fn commit(&self, message: &str) -> Result<()> {
         Command::new("git")
             .args(["add", "--all",])
@@ -179,6 +170,60 @@ impl Git {
             .args(["commit", &format!("--author=\"{} <{}>\"", self.author, self.email), "-m", message])
             .output()
             .expect("[commit] failed to commit");
+
+        Ok(())
+    }
+
+    // push commit
+    pub fn push(&self) -> Result<()> {
+        let output = Command::new("git")
+            .args(["push", &format!("--repo={}", &self.repo_url.as_str())])
+            .output()?;
+
+        let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("output: {}", output);
+
+        // check if push was successful
+        if !output.contains("Everything up-to-date") {
+            self.undo_commit()?;
+            bail!("failed to push changes token may be invalid");
+        }
+
+        Ok(())
+    }
+
+    // push tag
+    pub fn push_tag(&self, tag: &str) -> Result<()> {
+        let output = Command::new("git")
+            .args(["push", &format!("--repo={}", &self.repo_url.as_str()), "origin", tag])
+            .output()?;
+
+        let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("output: {}", output);
+
+        // check if push was successful
+        if !output.contains("[new tag]") {
+            self.undo_tag(tag)?;
+            bail!("failed to push tag");
+        }
+
+        Ok(())
+    }
+
+    // undo last tag
+    pub fn undo_tag(&self, tag: &str) -> Result<()> {
+        Command::new("git")
+            .args(["tag", "-d", tag])
+            .output()?;
+
+        Ok(())
+    }
+
+    // undo last commit and changes
+    pub fn undo_commit(&self) -> Result<()> {
+        Command::new("git")
+            .args(["reset", "--hard", "HEAD^"])
+            .output()?;
 
         Ok(())
     }

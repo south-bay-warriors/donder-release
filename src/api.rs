@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use serde::Serialize;
 use semver::Version;
@@ -34,7 +34,7 @@ impl GithubApi {
         };
 
         let client = reqwest::Client::new();
-        let _ = client
+        let response = client
             .post(format!("{}/releases", &self.api_url))
             .header(CONTENT_TYPE, &self.content_type)
             .header(USER_AGENT, &self.user_agent)
@@ -42,6 +42,13 @@ impl GithubApi {
             .json(&request_body)
             .send()
             .await?;
+
+        if !response.status().is_success() {
+            // get error message from response
+            let error_message = response.text().await?;
+            println!("error: {}", error_message);
+            bail!(error_message);
+        }
 
         Ok(())
     }
