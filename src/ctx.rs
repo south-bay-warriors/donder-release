@@ -248,7 +248,12 @@ impl Ctx {
             bail!("no packages to release make sure you have selected packages defined in your config file");
         }
 
-        let token = std::env::var("GH_TOKEN").context("GH_TOKEN env var not set")?;
+        let token = std::env::var("GH_TOKEN").unwrap_or("".to_string());
+
+        // if token is empty and we are not in preview mode bail
+        if token.is_empty() && !preview {
+            bail!("GH_TOKEN environment variable is not defined");
+        }
 
         let git_api = Git::new(
             &token,
