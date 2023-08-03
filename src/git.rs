@@ -53,22 +53,14 @@ impl Git {
         }
 
         // pull changes from remote
-        let output = Command::new("git")
+        Command::new("git")
             .args(["pull", &self.repo_url])
             .output()?;
 
-        if !output.status.success() {
-            bail!("failed to pull changes");
-        }
-
         // fetch tags from remote
-        let output = Command::new("git")
+        Command::new("git")
             .args(["fetch", "--prune", "--prune-tags", &self.repo_url])
             .output()?;
-
-        if !output.status.success() {
-            bail!("failed to fetch tags");
-        }
 
         Ok(())
     }
