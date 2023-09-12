@@ -211,7 +211,7 @@ impl Git {
         // check if push was successful
         if !output.status.success() {
             self.undo_tag(tag)?;
-            bail!(format!("failed to push tag: {}", String::from_utf8_lossy(&output.stderr)));
+            bail!(format!("failed to push tag: {} {}\n{}", tag, &self.repo_url.as_str(), String::from_utf8_lossy(&output.stderr)));
         }
 
         Ok(())
