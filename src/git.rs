@@ -181,7 +181,7 @@ impl Git {
             .output()?;
 
         if !output.status.success() {
-            bail!("failed to commit changes");
+            bail!(format!("failed to commit changes: {}", String::from_utf8_lossy(&output.stderr)));
         }
 
         Ok(())
