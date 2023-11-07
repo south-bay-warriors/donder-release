@@ -34,6 +34,7 @@ tag_prefix: v
 # (supported versioning file targets: cargo, npm, pub, android and ios)
 # Set the package property to true and the bump file parent folder will be treated as the root for commits made under
 # that folder and will have their own releases, this is useful for monorepos.
+# Set the build_metadata property to true and the version will be appended with a build number.
 # bump_files:
 #   - { target: cargo, path: Cargo.toml }
 #   - { target: npm, path: package.json }
