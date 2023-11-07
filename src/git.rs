@@ -217,6 +217,20 @@ impl Git {
         Ok(())
     }
 
+    // delete tag on remote
+    pub fn delete_tag(&self, tag: &str) -> Result<()> {
+        let output = Command::new("git")
+            .args(["push", "--delete", &self.repo_url.as_str(), tag])
+            .output()?;
+
+        // check if push was successful
+        if !output.status.success() {
+            bail!(format!("failed to delete tag on remote: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        Ok(())
+    }
+
     // undo last tag
     pub fn undo_tag(&self, tag: &str) -> Result<()> {
         let output = Command::new("git")

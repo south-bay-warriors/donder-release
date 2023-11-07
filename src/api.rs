@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use semver::Version;
 
 #[derive(Default, Debug)]
@@ -12,6 +12,13 @@ pub struct GithubApi {
     content_type: String,
     user_agent: String,
     authorization: String,
+}
+
+#[derive(Deserialize)]
+pub struct Release {
+    pub id: u64,
+    pub tag_name: String,
+    pub prerelease: bool,
 }
 
 impl GithubApi {
@@ -48,6 +55,50 @@ impl GithubApi {
             let error_message = response.text().await?;
             println!("error: {}", error_message);
             bail!(error_message);
+        }
+
+        Ok(())
+    }
+
+    pub async fn clean_pre_releases(&self, tag_prefix: &str) -> Result<()> {
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{}/releases", &self.api_url))
+            .header(CONTENT_TYPE, &self.content_type)
+            .header(USER_AGENT, &self.user_agent)
+            .header(AUTHORIZATION, &self.authorization)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            // get error message from response
+            let error_message = response.text().await?;
+            println!("error: {}", error_message);
+            bail!(error_message);
+        }
+
+        let releases: Vec<Release> = response.json().await?;
+        let pre_releases: Vec<&Release> = releases.iter().filter(|r| r.prerelease).collect();
+
+        for release in pre_releases {
+            let tag = release.tag_name.replace(tag_prefix, "");
+            let version = Version::parse(&tag).unwrap();
+            if !version.pre.is_empty() {
+                let response = client
+                    .delete(format!("{}/releases/{}", &self.api_url, release.id))
+                    .header(CONTENT_TYPE, &self.content_type)
+                    .header(USER_AGENT, &self.user_agent)
+                    .header(AUTHORIZATION, &self.authorization)
+                    .send()
+                    .await?;
+
+                if !response.status().is_success() {
+                    // get error message from response
+                    let error_message = response.text().await?;
+                    println!("error: {}", error_message);
+                    bail!(error_message);
+                }
+            }
         }
 
         Ok(())

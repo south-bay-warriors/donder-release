@@ -22,6 +22,8 @@ release_message: "chore(release): %s"
 tag_prefix: v
 # If defined changelog will be written to this file
 # changelog_file: CHANGELOG.md
+# Clean pre releases when a new release is published
+# clean_pre_releases: true
 # Allowed types that trigger a release and their corresponding semver bump
 # feat, fix and revert commit types are reserved types and can only have its section name changed
 # types:
@@ -67,6 +69,9 @@ pub struct Ctx {
     /// Allowed types of that trigger a release and their corresponding semver bump
     #[serde(default = "default_bump_files")]
     pub bump_files: BumpFiles,
+    /// Clean pre releases when a new release is published
+    #[serde(default = "default_clean_pre_releases")]
+    pub clean_pre_releases: bool,
     /// Include authors in changelog
     #[serde(default = "default_include_authors")]
     pub include_authors: bool,
@@ -104,6 +109,10 @@ fn default_types() -> ReleaseTypes {
 
 fn default_bump_files() -> BumpFiles {
     vec![]
+}
+
+fn default_clean_pre_releases() -> bool {
+    false
 }
 
 fn default_include_authors() -> bool {

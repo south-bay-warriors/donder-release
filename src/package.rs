@@ -374,6 +374,27 @@ impl Pkg {
             &self.tag_prefix,
             &self.changelog.notes)
             .await?;
+        Ok(())
+    }
+
+    pub async fn clean_pre_releases(&self, git: &Git, api: &GithubApi) -> Result<()> {
+        logInfo!("Cleaning pre releases");
+
+        // Clean pre releases first
+        api.clean_pre_releases(&self.tag_prefix).await?;
+
+        // TODO: revise this loop because it can become expensive as the number of tags increases
+        // Delete tags
+        for tag_info in git.get_tags(&self.tag_prefix)? {
+            if tag_info.version.pre.is_empty() {
+                continue;
+            }
+
+            // Local tag
+            git.undo_tag(&tag_info.tag())?;
+            // Remote tag
+            git.delete_tag(&tag_info.tag())?;
+        }
 
         Ok(())
     }

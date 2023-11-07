@@ -150,12 +150,22 @@ async fn main() -> Result<()> {
                             logError!("Publishing release - {}", e.to_string());
                             process::exit(1);
                         });
+
+                    // Clean pre releases
+                    if ctx.pre_id.is_empty() && ctx.clean_pre_releases {
+                        pkg.clean_pre_releases(&ctx.git, &ctx.api)
+                            .await
+                            .unwrap_or_else(|e| {
+                                logInfo!("Cleaning pre releases had some issues - {}", e.to_string());
+                            });
+                        
+                    }
                 }
             }
         }
     }
 
-    logInfo!("completed successfully 🎉");
+    logInfo!("Completed successfully 🎉");
 
     Ok(())
 }
