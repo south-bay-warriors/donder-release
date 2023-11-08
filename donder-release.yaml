@@ -4,5 +4,5 @@ tag_prefix: v
 types:
   - { commit_type: perf, bump: patch, section: Performance Improvements }
 bump_files:
-  - { target: cargo, path: Cargo.toml }
-  - { target: npm, path: package.json }
+  - { target: cargo, path: <root> }
+  - { target: npm, path: <root> }
