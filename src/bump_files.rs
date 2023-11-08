@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, Ok, bail};
+use anyhow::{Context, Result, Ok};
 use regex::Captures;
 use std::{
     fs,
@@ -109,6 +109,10 @@ fn bump_file(version: &String, file_path: &String, build_metadata: &bool) -> Res
     // Replace file version with the final version
     let new_contents = contents.replacen(&caps[0], &final_version, 1);
 
+    // Erase contents of the file first to avoid issues with the new contents being shorter than the old contents
+    file.set_len(0)
+        .context(format!("failed to erase contents of file {}", file_path))?;
+
     // Write the new contents to the file
     file.seek(SeekFrom::Start(0))
         .context(format!("failed to seek to start of file {}", file_path))?;
@@ -197,8 +201,67 @@ pub fn bump_pub(version: &String, file_path: &String, build_metadata: &bool) -> 
     bump_file(version, &p, build_metadata)
 }
 
-pub fn bump_android(_: &String, _: &String) -> Result<()> {
-    bail!("android bumping is not yet supported");
+pub fn bump_android(version: &String, file_path: &String) -> Result<()> {
+    // Capture version data from version
+    let caps = version_data(&version)
+        .context(format!("failed to find metadata in version {}", file_path))?;
+
+    let version_name = caps.get(1).unwrap().as_str();
+    let pre_release_version = match caps.get(2) {
+        Some(pre_release) => pre_release.as_str(),
+        None => "",
+    };
+
+    let version_name = match pre_release_version {
+        "" => version_name.to_string(),
+        _ => format!("{}-{}", version_name, pre_release_version),
+    };
+
+    // Get build.gradle file path
+    let p = format!("{}/app/build.gradle", file_path.trim_end_matches("/"));
+
+    // Read the build.gradle file
+    let mut build_gradle = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&p)
+        .context(format!("failed to open file {}", p))?;
+
+    let mut contents = String::new();
+    build_gradle.read_to_string(&mut contents)
+        .context(format!("failed to read file {}", p))?;
+
+    // Find the versionCode line
+    let re = regex::Regex::new(r#"versionCode \d+"#).unwrap();
+    let caps = re.captures(&contents)
+        .context(format!("failed to find versionCode in file {}", p))?;
+
+    // Increment the versionCode
+    let version_code = caps[0].trim_start_matches("versionCode ").trim_end().parse::<u32>().unwrap() + 1;
+    let new_contents = contents
+        .replace(&caps[0], &format!("versionCode {}", version_code));
+
+    // Find the versionName line
+    let re = regex::Regex::new(r#"versionName ".*""#).unwrap();
+    let caps = re.captures(&contents)
+        .context(format!("failed to find versionName in file {}", p))?;
+
+    // Replace versionName with the new version
+    let new_contents = new_contents
+        .replace(&caps[0], &format!("versionName \"{}\"", version_name));
+
+    // Erase contents of the file first to avoid issues with the new contents being shorter than the old contents
+    build_gradle.set_len(0)
+        .context(format!("failed to erase contents of file {}", p))?;
+
+    // Write the new contents to the file
+    build_gradle.seek(SeekFrom::Start(0))
+        .context(format!("failed to seek to start of file {}", p))?;
+
+    build_gradle.write_all(new_contents.as_bytes())
+        .context(format!("failed to write to file {}", p))?;
+
+    Ok(())
 }
 
 pub fn bump_ios(version: &String, file_path: &String) -> Result<()> {
@@ -263,6 +326,10 @@ pub fn bump_ios(version: &String, file_path: &String) -> Result<()> {
     // Replace CURRENT_PROJECT_VERSION with the new version
     let new_contents = new_contents
         .replace(&caps[0], &format!("CURRENT_PROJECT_VERSION = {};", next_project_version));
+
+    // Erase contents of the file first to avoid issues with the new contents being shorter than the old contents
+    xcode_project.set_len(0)
+        .context(format!("failed to erase contents of file {}", p))?;
 
     // Write the new contents to the file
     xcode_project.seek(SeekFrom::Start(0))
