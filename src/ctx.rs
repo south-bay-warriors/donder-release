@@ -31,18 +31,27 @@ tag_prefix: v
 #   - { commit_type: fix, section: Bug Fixes }
 #   - { commit_type: perf, bump: patch, section: Performance Improvements }
 # If defined will bump the version in this files, at least one file must be defined for a release to be published.
-# (supported versioning file targets: cargo, npm, pub, android and ios)
+# Supported versioning file targets are: cargo, npm, pub, android and ios.
+# For android the path must be the root of the android folder.
+# For ios the path must be the root of the ios folder and the name of the project.
 # Set the package property to true and the bump file parent folder will be treated as the root for commits made under
 # that folder and will have their own releases, this is useful for monorepos.
-# Set the build_metadata property to true and the version will be appended with a build number.
+# Set the build_metadata property to true and the version will be appended with a build number. (e.g: 1.0.0+1, 1.0.0-alpha.1+1, etc.)
+# For android and ios targets the build_metadata property will be ignored and the build number will be incremented.
+# Use <root> as the path to target to let donder-release know that it should look for files where it was executed.
 # bump_files:
-#   - { target: cargo, path: Cargo.toml }
-#   - { target: npm, path: package.json }
-#   - { target: pub, path: pubspec.yaml, build_metadata: true }
-#   - { target: android, path: app/build.gradle, build_metadata: true }
-#   - { target: ios, path: <my_app>/Info.plist, build_metadata: true }
-#   - { target: npm, path: packages/a-test/package.json, package: true }
-#   - { target: npm, path: packages/b-test/package.json, package: true }
+#   - { target: cargo, path: <root> }
+#   - { target: npm, path: <root> }
+#   - { target: npm, path: <root>, build_metadata: true }
+#   - { target: pub, path: <root> }
+#   - { target: pub, path: <root>, build_metadata: true }
+#   - { target: android, path: "<root>" }
+#   - { target: android, path: android }
+    # ios target requires the name of the project
+#   - { target: ios, path: my_app_name }
+#   - { target: ios, path: ios/my_app_name }
+#   - { target: npm, path: packages/a-package/package.json, package: true }
+#   - { target: npm, path: packages/b-package/package.json, package: true }
 "#;
 
     let config_path = path::Path::new("./donder-release.yaml");

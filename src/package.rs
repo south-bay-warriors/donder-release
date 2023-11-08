@@ -325,24 +325,19 @@ impl Pkg {
         for file in &self.bump_files {
             match file.target.as_str() {
                 "cargo" => {
-                    bump_cargo(version, &file.path, &file.build_metadata)
-                        .context("failed to bump cargo file")?;
+                    bump_cargo(version, &file.path, &file.build_metadata)?;
                 },
                 "npm" => {
-                    bump_npm(version, &file.path, &file.build_metadata)
-                        .context("failed to bump npm file")?;
+                    bump_npm(version, &file.path, &file.build_metadata)?;
                 },
                 "pub" => {
-                    bump_pub(version, &file.path, &file.build_metadata)
-                        .context("failed to bump pub file")?;
+                    bump_pub(version, &file.path, &file.build_metadata)?;
                 },
                 "android" => {
-                    bump_android(version, &file.path)
-                        .context("failed to bump android file")?;
+                    bump_android(version, &file.path)?;
                 },
                 "ios" => {
-                    bump_ios(version, &file.path)
-                        .context("failed to bump ios file")?;
+                    bump_ios(version, &file.path)?;
                 },
                 _ => bail!("invalid file bump target"),
             }
