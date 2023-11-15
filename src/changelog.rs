@@ -67,10 +67,11 @@ impl Changelog {
         }
 
         // Parse commit body
-        for line in git_commit.subject.lines() {
+        for line in git_commit.body.lines() {
             // Breaking changes
             if line.starts_with("BREAKING CHANGE: ") {
-                commit.breaking = line.replace("BREAKING CHANGE: ", "");
+                commit.breaking = line.replace("BREAKING CHANGE: ", "").to_string();
+
                 // Get commit info if no section type is found, this can happen if the commit
                 // is not in the range of release_types but it's still relevant for the changelog
                 // because it contains a breaking change, which should trigger a major release.
@@ -224,6 +225,21 @@ impl Changelog {
                         )),
                     }
                 }
+            }
+        }
+
+        // filter commits with breaking changes
+        let breaking_changes: Vec<&ChangelogCommit> = self
+            .commits
+            .iter()
+            .filter(|c| !c.breaking.is_empty())
+            .collect();
+
+        // Write breaking changes section
+        if !breaking_changes.is_empty() {
+            self.notes.push_str("\r\n### BREAKING CHANGES\r\n");
+            for commit in breaking_changes {
+                self.notes.push_str(&format!("- {}\r\n", commit.breaking));
             }
         }
 
