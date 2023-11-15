@@ -196,7 +196,7 @@ impl Git {
         // check if push was successful
         if !output.status.success() {
             self.undo_commit()?;
-            bail!("failed to push changes token may be invalid");
+            bail!("failed to push changes token may be invalid: {}", String::from_utf8_lossy(&output.stderr));
         }
 
         Ok(())
