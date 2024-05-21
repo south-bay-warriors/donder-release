@@ -41,7 +41,7 @@ impl Changelog {
         };
 
         // save a reference to the first line to be used later if needed
-        let pattern = r"^(TOKENS){1}(\([\w\-\.]+\))?(!)?: ([\w ]+)";
+        let pattern = r"^(TOKENS){1}(\([\w\-\.]+\))?(!)?: (.+)";
         let pattern = pattern.replace(
             "TOKENS",
             release_types.join("|").as_str(),
@@ -76,7 +76,7 @@ impl Changelog {
                 // is not in the range of release_types but it's still relevant for the changelog
                 // because it contains a breaking change, which should trigger a major release.
                 if commit.section_type.is_empty() {
-                    let re = Regex::new(r"^(\w+)(\([\w\-\.]+\))?(!)?: ([\w ]+)").unwrap();
+                    let re = Regex::new(r"^(\w+)(\([\w\-\.]+\))?(!)?: (.+)").unwrap();
                     let caps = re.captures(&git_commit.subject);
                     match caps {
                         Some(caps) => {
