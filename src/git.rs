@@ -52,10 +52,11 @@ impl Git {
            bail!("There are uncommitted changes. Please commit or stash them before running donder-release.");
         }
 
+        // removed because it was causing git merge conflicts - the user must make sure the local branch is up to date
         // pull changes from remote
-        Command::new("git")
-            .args(["pull", &self.repo_url])
-            .output()?;
+        // Command::new("git")
+        //     .args(["pull", &self.repo_url])
+        //     .output()?;
 
         // fetch tags from remote
         Command::new("git")
