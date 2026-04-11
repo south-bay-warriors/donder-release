@@ -209,17 +209,17 @@ impl Pkg {
             let mut pre = next_release_version.pre;
 
             if pre.is_empty() {
-                pre = Prerelease::new(format!("{}.0", pre_id.clone()).as_str())
+                pre = Prerelease::new(format!("{}.0", pre_id).as_str())
                     .context("failed to update pre release")?
             } else {
                 let parts = pre.split(".").collect::<Vec<&str>>();
 
                 if parts[0] == pre_id {
                     pre = Prerelease::new(
-                        format!("{}.{}", pre_id.clone(), parts[1].parse::<u32>().unwrap() + 1).as_str(),
+                        format!("{}.{}", pre_id, parts[1].parse::<u32>().unwrap() + 1).as_str(),
                     ).context("failed to update pre release")?
                 } else {
-                    pre = Prerelease::new(format!("{}.0", pre_id.clone()).as_str())
+                    pre = Prerelease::new(format!("{}.0", pre_id).as_str())
                         .context("failed to update pre release")?
                 }
             }

@@ -82,8 +82,10 @@ pub struct Ctx {
     /// Clean pre releases when a new release is published
     #[serde(default = "default_clean_pre_releases")]
     pub clean_pre_releases: bool,
-    /// Include authors in changelog
+    // TODO: add option to include commit body in changelog
+    /// Include authors in changelog (not yet implemented)
     #[serde(default = "default_include_authors")]
+    #[allow(dead_code)]
     pub include_authors: bool,
     /// If not empty changelog will be written to this file
     #[serde(default)]
