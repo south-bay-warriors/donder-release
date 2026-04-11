@@ -161,7 +161,7 @@ impl Ctx {
                 || release_type.commit_type == "revert"
             {
                 if !release_type.bump.is_empty() {
-                    bail!("feat, fix and perf are reserved types and cannot have a bump");
+                    bail!("feat, fix and revert are reserved types and cannot have a bump");
                 }
             // Only allow minor and patch bumps
             } else if release_type.bump != "minor" && release_type.bump != "patch" {
@@ -338,7 +338,7 @@ types:
         let result = Ctx::new(config, "".to_string(), true, vec![]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("reserved types"));
+        assert!(err.contains("feat, fix and revert are reserved types"));
     }
 
     #[test]
