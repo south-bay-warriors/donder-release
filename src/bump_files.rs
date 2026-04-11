@@ -33,7 +33,7 @@ use serde_json::{Map, Value};
 /// assert_eq!(caps.get(2).unwrap().as_str(), "alpha.1");
 /// assert_eq!(caps.get(3).unwrap().as_str(), "5");
 /// ```
-pub(crate) fn version_data<'t>(text: &'t str) -> Option<Captures<'t>> {
+fn version_data<'t>(text: &'t str) -> Option<Captures<'t>> {
     let re = regex::Regex::new(
         r"(\d+\.\d+\.\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
     ).unwrap();
@@ -69,7 +69,7 @@ pub(crate) fn version_data<'t>(text: &'t str) -> Option<Captures<'t>> {
 /// 
 /// assert_eq!(result.unwrap(), "android/app/build.gradle");
 /// ```
-pub(crate) fn parse_path(path: &String, file: String) -> Result<String> {
+fn parse_path(path: &String, file: String) -> Result<String> {
     let path = path.replace("<root>", "");
     
     if path.is_empty() {

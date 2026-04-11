@@ -264,10 +264,12 @@ mod tests {
         ]
     }
 
-    // parse_commit tests
+    // Conventional Commits 1.0.0 spec compliance tests
+    // https://www.conventionalcommits.org/en/v1.0.0/
 
+    // Spec: "Commits MUST be prefixed with a type"
     #[test]
-    fn parse_commit_feat() {
+    fn spec_feat_type_parsed() {
         let mut cl = Changelog::new();
         let commit = Commit::new("abc123", "feat: add login", "");
         cl.parse_commit(&release_types(), &commit);
@@ -280,43 +282,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_commit_fix_with_scope() {
+    fn spec_fix_type_parsed() {
         let mut cl = Changelog::new();
-        let commit = Commit::new("def456", "fix(auth): handle null token", "");
+        let commit = Commit::new("e1", "fix: null pointer", "");
         cl.parse_commit(&release_types(), &commit);
 
         assert_eq!(cl.commits.len(), 1);
         assert_eq!(cl.commits[0].section_type, "fix");
-        assert_eq!(cl.commits[0].scope, "auth");
-        assert_eq!(cl.commits[0].desc, "handle null token");
     }
 
+    // Spec: "types other than feat and fix MAY be used"
     #[test]
-    fn parse_commit_breaking_change_in_body() {
+    fn spec_custom_type_parsed() {
         let mut cl = Changelog::new();
-        let commit = Commit::new("ghi789", "feat: new api", "BREAKING CHANGE: removed old endpoint");
+        let commit = Commit::new("c1", "perf: optimize query", "");
         cl.parse_commit(&release_types(), &commit);
 
         assert_eq!(cl.commits.len(), 1);
-        assert_eq!(cl.commits[0].breaking, "removed old endpoint");
+        assert_eq!(cl.commits[0].section_type, "perf");
     }
 
+    // Commits with types not in the configured release_types are ignored
     #[test]
-    fn parse_commit_breaking_change_unknown_type_gets_parsed() {
-        let mut cl = Changelog::new();
-        let commit = Commit::new("xyz000", "chore(deps): upgrade lib", "BREAKING CHANGE: api changed");
-        cl.parse_commit(&release_types(), &commit);
-
-        // chore is not in release_types, but breaking change body triggers fallback parsing
-        assert_eq!(cl.commits.len(), 1);
-        assert_eq!(cl.commits[0].section_type, "chore");
-        assert_eq!(cl.commits[0].scope, "deps");
-        assert_eq!(cl.commits[0].desc, "upgrade lib");
-        assert_eq!(cl.commits[0].breaking, "api changed");
-    }
-
-    #[test]
-    fn parse_commit_ignores_unrecognized_type_without_breaking() {
+    fn spec_unrecognized_type_ignored() {
         let mut cl = Changelog::new();
         let commit = Commit::new("aaa111", "docs: update readme", "");
         cl.parse_commit(&release_types(), &commit);
@@ -324,18 +312,42 @@ mod tests {
         assert_eq!(cl.commits.len(), 0);
     }
 
+    // Commit without any type prefix is not a conventional commit
     #[test]
-    fn parse_commit_special_chars_in_description() {
+    fn spec_no_type_prefix_ignored() {
         let mut cl = Changelog::new();
-        let commit = Commit::new("ccc333", "feat: load env vars from donder-release.env", "");
+        let commit = Commit::new("aaa", "add new feature", "");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 0);
+    }
+
+    // Spec: "A scope MAY be provided after a type"
+    #[test]
+    fn spec_scope_is_optional() {
+        let mut cl = Changelog::new();
+        cl.parse_commit(&release_types(), &Commit::new("a1", "feat: no scope", ""));
+        cl.parse_commit(&release_types(), &Commit::new("a2", "fix(auth): handle null token", ""));
+
+        assert_eq!(cl.commits.len(), 2);
+        assert!(cl.commits[0].scope.is_empty());
+        assert_eq!(cl.commits[1].scope, "auth");
+        assert_eq!(cl.commits[1].desc, "handle null token");
+    }
+
+    // Scope with special characters
+    #[test]
+    fn spec_scope_with_dots_and_dashes() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("bbb222", "feat(my-lib.core): add parser", "");
         cl.parse_commit(&release_types(), &commit);
 
         assert_eq!(cl.commits.len(), 1);
-        assert_eq!(cl.commits[0].desc, "load env vars from donder-release.env");
+        assert_eq!(cl.commits[0].scope, "my-lib.core");
     }
 
     #[test]
-    fn parse_commit_scope_with_slash() {
+    fn spec_scope_with_slash() {
         let mut cl = Changelog::new();
         let commit = Commit::new("ddd444", "feat(ui/auth): add login page", "");
         cl.parse_commit(&release_types(), &commit);
@@ -345,14 +357,118 @@ mod tests {
         assert_eq!(cl.commits[0].desc, "add login page");
     }
 
+    // Spec: "A description MUST immediately follow the colon and space"
     #[test]
-    fn parse_commit_scoped_with_dots_and_dashes() {
+    fn spec_missing_space_after_colon_is_ignored() {
         let mut cl = Changelog::new();
-        let commit = Commit::new("bbb222", "feat(my-lib.core): add parser", "");
+        let commit = Commit::new("aaa", "feat:missing space", "");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 0);
+    }
+
+    #[test]
+    fn spec_empty_description_is_ignored() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("aaa", "feat: ", "");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 0);
+    }
+
+    // Description can contain special characters (regression for #1)
+    #[test]
+    fn spec_description_with_special_chars() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("ccc333", "feat: load env vars from donder-release.env", "");
         cl.parse_commit(&release_types(), &commit);
 
         assert_eq!(cl.commits.len(), 1);
-        assert_eq!(cl.commits[0].scope, "my-lib.core");
+        assert_eq!(cl.commits[0].desc, "load env vars from donder-release.env");
+    }
+
+    // Spec: "BREAKING CHANGE: MUST be included in the footer portion of a commit"
+    #[test]
+    fn spec_breaking_change_footer() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("ghi789", "feat: new api", "BREAKING CHANGE: removed old endpoint");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].breaking, "removed old endpoint");
+    }
+
+    #[test]
+    fn spec_breaking_change_footer_after_multiline_body() {
+        let mut cl = Changelog::new();
+        let body = "This explains the change in detail.\n\nBREAKING CHANGE: config format changed from YAML to TOML";
+        let commit = Commit::new("f1", "feat: new config system", body);
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].breaking, "config format changed from YAML to TOML");
+    }
+
+    // BREAKING CHANGE footer on unrecognized type still triggers parsing via fallback
+    #[test]
+    fn spec_breaking_change_on_unrecognized_type_triggers_fallback() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("xyz000", "chore(deps): upgrade lib", "BREAKING CHANGE: api changed");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].section_type, "chore");
+        assert_eq!(cl.commits[0].scope, "deps");
+        assert_eq!(cl.commits[0].desc, "upgrade lib");
+        assert_eq!(cl.commits[0].breaking, "api changed");
+    }
+
+    // Spec: "Breaking changes MUST be indicated ... by appending a ! after the type/scope"
+    #[test]
+    fn spec_exclamation_mark_without_footer() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("d1", "feat!: drop legacy support", "");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].section_type, "feat");
+        assert_eq!(cl.commits[0].desc, "drop legacy support");
+        // NOTE: current impl does not set `breaking` from `!` alone,
+        // only from BREAKING CHANGE footer
+    }
+
+    #[test]
+    fn spec_exclamation_mark_with_scope() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("d2", "fix(api)!: rename endpoint", "");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].section_type, "fix");
+        assert_eq!(cl.commits[0].scope, "api");
+        assert_eq!(cl.commits[0].desc, "rename endpoint");
+    }
+
+    #[test]
+    fn spec_exclamation_mark_with_breaking_change_footer() {
+        let mut cl = Changelog::new();
+        let commit = Commit::new("d3", "feat!: new auth flow", "BREAKING CHANGE: OAuth 1.0 no longer supported");
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].breaking, "OAuth 1.0 no longer supported");
+    }
+
+    // Multiple commits of the same type should all be captured
+    #[test]
+    fn spec_multiple_commits_same_type() {
+        let mut cl = Changelog::new();
+        cl.parse_commit(&release_types(), &Commit::new("g1", "fix: bug one", ""));
+        cl.parse_commit(&release_types(), &Commit::new("g2", "fix: bug two", ""));
+        cl.parse_commit(&release_types(), &Commit::new("g3", "fix: bug three", ""));
+
+        assert_eq!(cl.commits.len(), 3);
+        assert!(cl.commits.iter().all(|c| c.section_type == "fix"));
     }
 
     // write_notes tests
