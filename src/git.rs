@@ -286,7 +286,7 @@ impl ReleaseInfo {
     }
 }
 
-pub type Commits = Vec<Commit>; 
+pub type Commits = Vec<Commit>;
 
 #[derive(Debug)]
 pub struct Commit {
@@ -302,5 +302,67 @@ impl Commit {
             body: body.to_string(),
             hash: hash.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_info_new_parses_tag() {
+        let info = ReleaseInfo::new("v1.2.3", "v", false);
+        assert_eq!(info.version, Version::parse("1.2.3").unwrap());
+        assert_eq!(info.prefix, "v");
+        assert!(!info.initial);
+        assert!(info.head.is_empty());
+    }
+
+    #[test]
+    fn release_info_new_with_prerelease() {
+        let info = ReleaseInfo::new("v2.0.0-alpha.1", "v", false);
+        assert_eq!(info.version, Version::parse("2.0.0-alpha.1").unwrap());
+    }
+
+    #[test]
+    fn release_info_tag_formats_correctly() {
+        let info = ReleaseInfo::new("v1.0.0", "v", false);
+        assert_eq!(info.tag(), "v1.0.0");
+    }
+
+    #[test]
+    fn release_info_tag_with_package_prefix() {
+        let info = ReleaseInfo::new("my-pkg@v3.1.0", "my-pkg@v", false);
+        assert_eq!(info.tag(), "my-pkg@v3.1.0");
+    }
+
+    #[test]
+    fn release_info_update_head() {
+        let mut info = ReleaseInfo::new("v1.0.0", "v", false);
+        assert!(info.head.is_empty());
+        info.update_head("abc123");
+        assert_eq!(info.head, "abc123");
+    }
+
+    #[test]
+    fn release_info_initial_flag() {
+        let info = ReleaseInfo::new("v1.0.0", "v", true);
+        assert!(info.initial);
+    }
+
+    #[test]
+    fn commit_new_sets_fields() {
+        let c = Commit::new("abc123", "feat: add feature", "some body");
+        assert_eq!(c.hash, "abc123");
+        assert_eq!(c.subject, "feat: add feature");
+        assert_eq!(c.body, "some body");
+    }
+
+    #[test]
+    fn commit_new_empty_fields() {
+        let c = Commit::new("", "", "");
+        assert!(c.hash.is_empty());
+        assert!(c.subject.is_empty());
+        assert!(c.body.is_empty());
     }
 }

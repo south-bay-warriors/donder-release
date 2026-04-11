@@ -418,3 +418,148 @@ fn default_build_metadata() -> bool {
 fn default_package() -> bool {
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ctx::ReleaseType;
+
+    fn test_types() -> ReleaseTypes {
+        vec![
+            ReleaseType { commit_type: "feat".to_string(), bump: "minor".to_string(), section: "Features".to_string() },
+            ReleaseType { commit_type: "fix".to_string(), bump: "patch".to_string(), section: "Bug Fixes".to_string() },
+            ReleaseType { commit_type: "revert".to_string(), bump: "patch".to_string(), section: "Reverts".to_string() },
+        ]
+    }
+
+    fn make_pkg(tag: &str, prefix: &str, initial: bool) -> Pkg {
+        Pkg {
+            name: "".to_string(),
+            path: "".to_string(),
+            bump_files: vec![],
+            last_release: ReleaseInfo::new(tag, prefix, initial),
+            changelog: Changelog::new(),
+            commits: vec![],
+            tag_prefix: prefix.to_string(),
+        }
+    }
+
+    fn commit(subject: &str, body: &str) -> crate::git::Commit {
+        crate::git::Commit::new("abc123", subject, body)
+    }
+
+    // Pkg::new tests
+
+    #[test]
+    fn pkg_new_root_tag_prefix() {
+        let pkg = Pkg::new("".to_string(), "".to_string(), "v".to_string(), vec![]).unwrap();
+        assert_eq!(pkg.tag_prefix, "v");
+    }
+
+    #[test]
+    fn pkg_new_named_package_tag_prefix() {
+        let pkg = Pkg::new("my-lib".to_string(), "packages/my-lib".to_string(), "v".to_string(), vec![]).unwrap();
+        assert_eq!(pkg.tag_prefix, "my-lib@v");
+    }
+
+    // load_changelog tests
+
+    #[test]
+    fn load_changelog_no_relevant_commits_returns_false() {
+        let mut pkg = make_pkg("v1.0.0", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("docs: update readme", "")];
+
+        let result = pkg.load_changelog("", &test_types()).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn load_changelog_patch_bump() {
+        let mut pkg = make_pkg("v1.0.0", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: resolve crash", "")];
+
+        let result = pkg.load_changelog("", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.0.1");
+    }
+
+    #[test]
+    fn load_changelog_minor_bump() {
+        let mut pkg = make_pkg("v1.0.0", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![
+            commit("fix: a fix", ""),
+            commit("feat: new feature", ""),
+        ];
+
+        let result = pkg.load_changelog("", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.1.0");
+    }
+
+    #[test]
+    fn load_changelog_major_bump() {
+        let mut pkg = make_pkg("v1.2.3", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("feat: new api", "BREAKING CHANGE: old api removed")];
+
+        let result = pkg.load_changelog("", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v2.0.0");
+    }
+
+    #[test]
+    fn load_changelog_prerelease_from_stable() {
+        let mut pkg = make_pkg("v1.0.0", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: a fix", "")];
+
+        let result = pkg.load_changelog("alpha", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.0.1-alpha.0");
+    }
+
+    #[test]
+    fn load_changelog_prerelease_increment() {
+        let mut pkg = make_pkg("v1.0.1-alpha.0", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: another fix", "")];
+
+        let result = pkg.load_changelog("alpha", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.0.1-alpha.1");
+    }
+
+    #[test]
+    fn load_changelog_prerelease_id_change() {
+        let mut pkg = make_pkg("v1.0.1-beta.2", "v", false);
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: final fix", "")];
+
+        let result = pkg.load_changelog("rc", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.0.1-rc.0");
+    }
+
+    #[test]
+    fn load_changelog_initial_release() {
+        let mut pkg = make_pkg("v1.0.0", "v", true);
+        pkg.commits = vec![commit("feat: initial", "")];
+
+        let result = pkg.load_changelog("", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.0.0");
+    }
+
+    #[test]
+    fn load_changelog_initial_release_prerelease() {
+        let mut pkg = make_pkg("v1.0.0-alpha.0", "v", true);
+        pkg.commits = vec![commit("feat: initial", "")];
+
+        let result = pkg.load_changelog("alpha", &test_types()).unwrap();
+        assert!(result);
+        assert_eq!(pkg.changelog.next_release_version, "v1.0.0-alpha.0");
+    }
+}

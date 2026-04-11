@@ -340,3 +340,215 @@ pub fn bump_ios(version: &String, file_path: &String) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as IoWrite;
+
+    // version_data tests
+
+    #[test]
+    fn version_data_plain_semver() {
+        let caps = version_data("1.2.3").unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "1.2.3");
+        assert!(caps.get(2).is_none());
+        assert!(caps.get(3).is_none());
+    }
+
+    #[test]
+    fn version_data_with_prerelease() {
+        let caps = version_data("1.0.0-alpha.1").unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "1.0.0");
+        assert_eq!(caps.get(2).unwrap().as_str(), "alpha.1");
+        assert!(caps.get(3).is_none());
+    }
+
+    #[test]
+    fn version_data_with_build_metadata() {
+        let caps = version_data("1.0.0+5").unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "1.0.0");
+        assert!(caps.get(2).is_none());
+        assert_eq!(caps.get(3).unwrap().as_str(), "5");
+    }
+
+    #[test]
+    fn version_data_full() {
+        let caps = version_data("1.0.0-beta.2+3").unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "1.0.0");
+        assert_eq!(caps.get(2).unwrap().as_str(), "beta.2");
+        assert_eq!(caps.get(3).unwrap().as_str(), "3");
+    }
+
+    #[test]
+    fn version_data_no_match() {
+        assert!(version_data("not a version").is_none());
+    }
+
+    // parse_path tests
+
+    #[test]
+    fn parse_path_root_placeholder() {
+        let result = parse_path(&"<root>".to_string(), "Cargo.toml".to_string()).unwrap();
+        assert_eq!(result, "Cargo.toml");
+    }
+
+    #[test]
+    fn parse_path_subdir() {
+        let result = parse_path(&"android".to_string(), "app/build.gradle".to_string()).unwrap();
+        assert_eq!(result, "android/app/build.gradle");
+    }
+
+    // bump_file integration tests
+
+    #[test]
+    fn bump_file_updates_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("Cargo.toml");
+        let mut f = fs::File::create(&file_path).unwrap();
+        writeln!(f, "[package]\nname = \"test\"\nversion = \"1.0.0\"").unwrap();
+
+        bump_file(
+            &"1.1.0".to_string(),
+            &file_path.to_str().unwrap().to_string(),
+            &false,
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("version = \"1.1.0\""));
+        assert!(!contents.contains("1.0.0"));
+    }
+
+    #[test]
+    fn bump_file_with_build_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("Cargo.toml");
+        let mut f = fs::File::create(&file_path).unwrap();
+        writeln!(f, "[package]\nversion = \"1.0.0+2\"").unwrap();
+
+        bump_file(
+            &"1.1.0".to_string(),
+            &file_path.to_str().unwrap().to_string(),
+            &true,
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("1.1.0+3"));
+    }
+
+    #[test]
+    fn bump_npm_updates_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("package.json");
+        let json = r#"{"name": "test", "version": "1.0.0"}"#;
+        fs::write(&file_path, json).unwrap();
+
+        bump_npm(
+            &"1.2.0".to_string(),
+            &dir.path().to_str().unwrap().to_string(),
+            &false,
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&contents).unwrap();
+        assert_eq!(parsed["version"].as_str().unwrap(), "1.2.0");
+    }
+
+    #[test]
+    fn bump_android_updates_version_code_and_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_dir = dir.path().join("app");
+        fs::create_dir_all(&app_dir).unwrap();
+        let file_path = app_dir.join("build.gradle");
+        let content = r#"android {
+    defaultConfig {
+        versionCode 10
+        versionName "1.0.0"
+    }
+}"#;
+        fs::write(&file_path, content).unwrap();
+
+        bump_android(
+            &"1.1.0".to_string(),
+            &dir.path().to_str().unwrap().to_string(),
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("versionCode 11"));
+        assert!(contents.contains("versionName \"1.1.0\""));
+    }
+
+    #[test]
+    fn bump_android_with_prerelease() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_dir = dir.path().join("app");
+        fs::create_dir_all(&app_dir).unwrap();
+        let file_path = app_dir.join("build.gradle");
+        let content = r#"android {
+    defaultConfig {
+        versionCode 5
+        versionName "1.0.0"
+    }
+}"#;
+        fs::write(&file_path, content).unwrap();
+
+        bump_android(
+            &"2.0.0-beta.1".to_string(),
+            &dir.path().to_str().unwrap().to_string(),
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("versionCode 6"));
+        assert!(contents.contains("versionName \"2.0.0-beta.1\""));
+    }
+
+    #[test]
+    fn bump_ios_updates_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let proj_dir = dir.path().join("myapp.xcodeproj");
+        fs::create_dir_all(&proj_dir).unwrap();
+        let file_path = proj_dir.join("project.pbxproj");
+        let content = r#"
+    buildSettings = {
+        CURRENT_PROJECT_VERSION = 1.0;
+        MARKETING_VERSION = 1.0.0;
+    };
+"#;
+        fs::write(&file_path, content).unwrap();
+
+        bump_ios(
+            &"2.0.0".to_string(),
+            &dir.path().join("myapp").to_str().unwrap().to_string(),
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("MARKETING_VERSION = 2.0.0;"));
+        // No pre-release → project version 5.0
+        assert!(contents.contains("CURRENT_PROJECT_VERSION = 5.0;"));
+    }
+
+    #[test]
+    fn bump_ios_prerelease_translation() {
+        let dir = tempfile::tempdir().unwrap();
+        let proj_dir = dir.path().join("myapp.xcodeproj");
+        fs::create_dir_all(&proj_dir).unwrap();
+        let file_path = proj_dir.join("project.pbxproj");
+        let content = r#"
+    buildSettings = {
+        CURRENT_PROJECT_VERSION = 5.0;
+        MARKETING_VERSION = 1.0.0;
+    };
+"#;
+        fs::write(&file_path, content).unwrap();
+
+        // alpha → 1, beta → 2, rc → 3
+        bump_ios(
+            &"2.0.0-rc.3".to_string(),
+            &dir.path().join("myapp").to_str().unwrap().to_string(),
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("MARKETING_VERSION = 2.0.0;"));
+        assert!(contents.contains("CURRENT_PROJECT_VERSION = 3.3;"));
+    }
+}
