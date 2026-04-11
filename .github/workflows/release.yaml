@@ -1,8 +1,15 @@
 name: Release
 
 on:
-  push:
-    branches: [master]
+  workflow_dispatch:
+    inputs:
+      type:
+        description: Release type
+        required: true
+        type: choice
+        options:
+          - release
+          - beta
 
 jobs:
   release:
@@ -32,7 +39,11 @@ jobs:
         id: donder
         run: |
           VERSION_BEFORE=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
-          cargo run
+          if [ "${{ inputs.type }}" = "beta" ]; then
+            cargo run -- --pre-id beta
+          else
+            cargo run
+          fi
           VERSION_AFTER=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
           if [ "$VERSION_BEFORE" != "$VERSION_AFTER" ]; then
             echo "released=true" >> $GITHUB_OUTPUT
@@ -48,6 +59,11 @@ jobs:
 
       - name: Publish to npm
         if: steps.donder.outputs.released == 'true'
-        run: npm publish
+        run: |
+          if [ "${{ inputs.type }}" = "beta" ]; then
+            npm publish --tag beta
+          else
+            npm publish
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
