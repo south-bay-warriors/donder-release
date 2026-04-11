@@ -100,12 +100,16 @@ fn bump_file(version: &String, file_path: &String, build_metadata: &bool) -> Res
     // Final version with optional build metadata
     let final_version = match build_metadata {
         true => match caps.get(3) {
-            Some(build) => format!("{}+{}", version, build.as_str().parse::<u32>().unwrap() + 1),
+            Some(build) => {
+                let build_number: u32 = build.as_str().parse()
+                    .context("non-numeric build metadata is not supported, please update it to a numeric value (e.g. 1.0.0+1)")?;
+                format!("{}+{}", version, build_number + 1)
+            },
             None => format!("{}+{}", version, 1),
         },
         false => version.to_string(),
     };
-        
+
     // Replace file version with the final version
     let new_contents = contents.replacen(&caps[0], &final_version, 1);
 
@@ -183,7 +187,11 @@ pub fn bump_npm(version: &String, file_path: &String, build_metadata: &bool) -> 
     // Final version with optional build metadata
     let final_version = match build_metadata {
         true => match caps.get(3) {
-            Some(build) => format!("{}+{}", version, build.as_str().parse::<u32>().unwrap() + 1),
+            Some(build) => {
+                let build_number: u32 = build.as_str().parse()
+                    .context("non-numeric build metadata is not supported, please update it to a numeric value (e.g. 1.0.0+1)")?;
+                format!("{}+{}", version, build_number + 1)
+            },
             None => format!("{}+{}", version, 1),
         },
         false => version.to_string(),
@@ -434,6 +442,40 @@ mod tests {
 
         let contents = fs::read_to_string(&file_path).unwrap();
         assert!(contents.contains("1.1.0+3"));
+    }
+
+    #[test]
+    fn bump_file_non_numeric_build_metadata_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("Cargo.toml");
+        let mut f = fs::File::create(&file_path).unwrap();
+        writeln!(f, "[package]\nversion = \"1.0.0+exp.sha.5114f85\"").unwrap();
+
+        let result = bump_file(
+            &"1.1.0".to_string(),
+            &file_path.to_str().unwrap().to_string(),
+            &true,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-numeric build metadata is not supported"));
+    }
+
+    #[test]
+    fn bump_npm_non_numeric_build_metadata_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("package.json");
+        let json = r#"{"name": "test", "version": "1.0.0+exp.sha.5114f85"}"#;
+        fs::write(&file_path, json).unwrap();
+
+        let result = bump_npm(
+            &"1.1.0".to_string(),
+            &dir.path().to_str().unwrap().to_string(),
+            &true,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-numeric build metadata is not supported"));
     }
 
     #[test]
