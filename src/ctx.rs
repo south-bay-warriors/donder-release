@@ -313,3 +313,119 @@ pub struct ReleaseType {
     /// Section of the changelog
     pub section: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as IoWrite;
+
+    fn write_config(dir: &std::path::Path, yaml: &str) -> String {
+        let path = dir.join("donder-release.yaml");
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(yaml.as_bytes()).unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn ctx_rejects_reserved_type_with_custom_bump() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+bump_files:
+  - { target: cargo, path: "<root>" }
+types:
+  - { commit_type: feat, bump: patch, section: Features }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("reserved types"));
+    }
+
+    #[test]
+    fn ctx_rejects_invalid_bump_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+bump_files:
+  - { target: cargo, path: "<root>" }
+types:
+  - { commit_type: perf, bump: major, section: Performance }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("only minor and patch"));
+    }
+
+    #[test]
+    fn ctx_rejects_empty_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+bump_files:
+  - { target: cargo, path: "<root>" }
+types:
+  - { commit_type: perf, bump: patch, section: "" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("section cannot be empty"));
+    }
+
+    #[test]
+    fn ctx_rejects_no_bump_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), "tag_prefix: v\n");
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("at least one bump file"));
+    }
+
+    #[test]
+    fn ctx_rejects_unsupported_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+bump_files:
+  - { target: maven, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("unsupported bump file target"));
+    }
+
+    #[test]
+    fn ctx_valid_config_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+tag_prefix: v
+bump_files:
+  - { target: cargo, path: "<root>" }
+types:
+  - { commit_type: perf, bump: patch, section: Performance Improvements }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_ok());
+        let ctx = result.unwrap();
+        assert_eq!(ctx.tag_prefix, "v");
+        assert!(ctx.preview);
+        // Should have 4 types: feat, fix, revert (defaults) + perf
+        assert_eq!(ctx.types.len(), 4);
+    }
+
+    #[test]
+    fn ctx_reserved_type_section_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+bump_files:
+  - { target: npm, path: "<root>" }
+types:
+  - { commit_type: feat, section: New Features }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_ok());
+        let ctx = result.unwrap();
+        let feat_type = ctx.types.iter().find(|t| t.commit_type == "feat").unwrap();
+        assert_eq!(feat_type.section, "New Features");
+    }
+}
