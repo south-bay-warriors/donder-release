@@ -32,5 +32,4 @@ donder-release --help
 
 - Footer links support
 - Add documentation
-- Add CI
 - Add support to other git providers(?)
