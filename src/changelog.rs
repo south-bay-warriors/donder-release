@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(cl.commits.len(), 0);
     }
 
-    // Description can contain special characters (regression for #1)
+    // Description can contain special characters
     #[test]
     fn spec_description_with_special_chars() {
         let mut cl = Changelog::new();
