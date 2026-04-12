@@ -465,8 +465,6 @@ fn calver_version(format: &str, micro: u64) -> String {
             "0Y" => format!("{:02}", now.year() % 100),
             "MM" => now.month().to_string(),
             "0M" => format!("{:02}", now.month()),
-            "DD" => now.day().to_string(),
-            "0D" => format!("{:02}", now.day()),
             "WW" => now.iso_week().week().to_string(),
             "0W" => format!("{:02}", now.iso_week().week()),
             "MICRO" => micro.to_string(),

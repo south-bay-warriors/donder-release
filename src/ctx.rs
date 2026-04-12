@@ -164,7 +164,7 @@ impl Ctx {
                 bail!("calver_format must have exactly 3 dot-separated segments (e.g. YYYY.MM.MICRO)");
             }
 
-            let valid_segments = ["YYYY", "YY", "0Y", "MM", "0M", "DD", "0D", "WW", "0W", "MICRO"];
+            let valid_segments = ["YYYY", "YY", "0Y", "MM", "0M", "WW", "0W", "MICRO"];
             for segment in &segments {
                 if !valid_segments.contains(segment) {
                     bail!("invalid calver_format segment '{}', valid segments: {}", segment, valid_segments.join(", "));
@@ -540,7 +540,7 @@ bump_files:
         let dir = tempfile::tempdir().unwrap();
         let config = write_config(dir.path(), r#"
 versioning: calver
-calver_format: YYYY.MM.DD
+calver_format: YYYY.MM.WW
 bump_files:
   - { target: cargo, path: "<root>" }
 "#);
