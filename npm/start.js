@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 
-const { exec } = require("child_process");
-
-const controller =
-  typeof AbortController !== "undefined"
-    ? new AbortController()
-    : { abort: () => {} };
-const { signal } = controller;
+const { spawn } = require("child_process");
 
 const [, , ...args] = process.argv;
 
-exec(
-  `donder-release ${args.join(" ")}`,
-  { signal },
-  (error, stdout, stderr) => {
-    stdout && console.log(stdout);
-    stderr && console.error(stderr);
-    if (error !== null) {
-      console.log(`exec error: ${error}`);
-    }
-  }
-);
+const child = spawn("donder-release", args, { stdio: "inherit" });
+
+child.on("close", (code) => {
+  process.exit(code ?? 1);
+});
 
 process.on("SIGTERM", () => {
-  controller.abort();
+  child.kill("SIGTERM");
 });
