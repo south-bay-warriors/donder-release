@@ -160,25 +160,28 @@ impl Git {
     }
 
     pub fn get_commits(&self, tag_head: &str, package_path: &str) -> Result<Vec<Commit>> {
+        // Use %x00 (null byte) as commit separator to handle multi-line bodies
+        let format = "%h|||%s|||%b%x00";
+
         // get commits between tag_head and HEAD
         let output = match tag_head.is_empty() {
             true => match package_path.is_empty() {
                 true => Command::new("git")
-                    .args(["log", "--pretty=format:\"%h|||%s|||%b\""])
+                    .args(["log", &format!("--pretty=format:{}", format)])
                     .output()
                     .expect("[get_commits] failed to fetch"),
                 false => Command::new("git")
-                    .args(["log", "--pretty=format:\"%h|||%s|||%b\"", package_path])
+                    .args(["log", &format!("--pretty=format:{}", format), package_path])
                     .output()
                     .expect("[get_commits] failed to fetch"),
             },
             false => match package_path.is_empty() {
                 true => Command::new("git")
-                    .args(["log", "--pretty=format:\"%h|||%s|||%b\"", &format!("{}..HEAD", tag_head)])
+                    .args(["log", &format!("--pretty=format:{}", format), &format!("{}..HEAD", tag_head)])
                     .output()
                     .expect("[get_commits] failed to fetch"),
                 false => Command::new("git")
-                    .args(["log", "--pretty=format:\"%h|||%s|||%b\"", &format!("{}..HEAD", tag_head), "--", package_path])
+                    .args(["log", &format!("--pretty=format:{}", format), &format!("{}..HEAD", tag_head), "--", package_path])
                     .output()
                     .expect("[get_commits] failed to fetch"),
             }
@@ -187,11 +190,12 @@ impl Git {
         let output = String::from_utf8_lossy(&output.stdout).to_string();
 
         let commits = output
-            .split("\n")
+            .split('\0')
+            .filter(|s| !s.is_empty())
             .map(|commit| {
-                let commit = commit.trim_matches(|c| c == '\"').split("|||").collect::<Vec<&str>>();
+                let commit = commit.trim().split("|||").collect::<Vec<&str>>();
                 match commit.len() {
-                    3 => Commit::new(commit[0], commit[1], commit[2]),
+                    3 => Commit::new(commit[0], commit[1], commit[2].trim()),
                     2 => Commit::new(commit[0], "", ""),
                     _ => Commit::new("", "", ""),
                 }

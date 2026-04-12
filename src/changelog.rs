@@ -58,6 +58,10 @@ impl Changelog {
                     },
                     None => (),
                 }
+                // Check for ! breaking change marker
+                if caps.get(3).is_some() {
+                    commit.breaking = caps.get(4).map_or(String::new(), |d| d.as_str().to_string());
+                }
                 match caps.get(4) {
                     Some(d) => commit.desc = d.as_str().to_string(),
                     None => (),
@@ -409,6 +413,28 @@ mod tests {
         assert_eq!(cl.commits[0].breaking, "config format changed from YAML to TOML");
     }
 
+    #[test]
+    fn spec_multiple_breaking_changes_last_one_wins() {
+        let mut cl = Changelog::new();
+        let body = "BREAKING CHANGE: first breaking\n\nBREAKING CHANGE: second breaking";
+        let commit = Commit::new("f2", "feat: multiple breaks", body);
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].breaking, "second breaking");
+    }
+
+    #[test]
+    fn spec_exclamation_mark_overridden_by_footer() {
+        let mut cl = Changelog::new();
+        let body = "Some body text.\n\nMore details here.\n\nBREAKING CHANGE: footer takes precedence";
+        let commit = Commit::new("f3", "feat!: description as breaking", body);
+        cl.parse_commit(&release_types(), &commit);
+
+        assert_eq!(cl.commits.len(), 1);
+        assert_eq!(cl.commits[0].breaking, "footer takes precedence");
+    }
+
     // BREAKING CHANGE footer on unrecognized type still triggers parsing via fallback
     #[test]
     fn spec_breaking_change_on_unrecognized_type_triggers_fallback() {
@@ -433,8 +459,7 @@ mod tests {
         assert_eq!(cl.commits.len(), 1);
         assert_eq!(cl.commits[0].section_type, "feat");
         assert_eq!(cl.commits[0].desc, "drop legacy support");
-        // NOTE: current impl does not set `breaking` from `!` alone,
-        // only from BREAKING CHANGE footer
+        assert_eq!(cl.commits[0].breaking, "drop legacy support");
     }
 
     #[test]
@@ -447,6 +472,7 @@ mod tests {
         assert_eq!(cl.commits[0].section_type, "fix");
         assert_eq!(cl.commits[0].scope, "api");
         assert_eq!(cl.commits[0].desc, "rename endpoint");
+        assert_eq!(cl.commits[0].breaking, "rename endpoint");
     }
 
     #[test]
