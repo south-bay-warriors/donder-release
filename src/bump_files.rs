@@ -272,38 +272,12 @@ pub fn bump_android(version: &String, file_path: &String) -> Result<()> {
     Ok(())
 }
 
-pub fn bump_ios(version: &String, file_path: &String) -> Result<()> {
+pub fn bump_ios(version: &String, file_path: &String, is_calver: bool) -> Result<()> {
     // Capture version data from version
     let caps = version_data(&version)
         .context(format!("failed to find metadata in version {}", file_path))?;
 
     let marketing_version = caps.get(1).unwrap().as_str();
-    let pre_release_version = match caps.get(2) {
-        Some(pre_release) => pre_release.as_str(),
-        None => "",
-    };
-
-    // App Store Connect is very limited in what it allows for version numbers. It only allows 3 period-separated
-    // numbers, and the first number must be greater than 0. It also does not allow any pre-release or build metadata.
-    // To account for this, we only support alpha, beta and rc pre-release ids, and translate them to numbers
-    // from 1 to 3.
-    // Any other pre-release ids will have a number of 4.
-    // If no pre release id is provided, <pre_id>.<pre_id_number> will default to 5.0
-    // which means it's not a pre release.
-    let next_project_version = match pre_release_version {
-        "" => "5.0".to_string(),
-        _ => {
-            let pre_release_components = pre_release_version.split(".").collect::<Vec<&str>>();
-            let next_project_version_id = match pre_release_components[0] {
-                "alpha" => 1,
-                "beta" => 2,
-                "rc" => 3,
-                _ => 4,
-            };
-
-            format!("{}.{}", next_project_version_id, pre_release_components[1])
-        }
-    };
 
     // Get xcode project file path
     let p = format!("{}.xcodeproj/project.pbxproj", file_path.trim_end_matches("/"));
@@ -321,19 +295,55 @@ pub fn bump_ios(version: &String, file_path: &String) -> Result<()> {
 
     // Find the MARKETING_VERSION line
     let re = regex::Regex::new(r#"MARKETING_VERSION = .*;"#).unwrap();
-    let caps = re.captures(&contents)
+    let caps_mv = re.captures(&contents)
         .context(format!("failed to find MARKETING_VERSION in file {}", p))?;
     // Replace MARKETING_VERSION with the new version
     let new_contents = contents
-        .replace(&caps[0], &format!("MARKETING_VERSION = {};", marketing_version));
+        .replace(&caps_mv[0], &format!("MARKETING_VERSION = {};", marketing_version));
 
     // Find the CURRENT_PROJECT_VERSION line
-    let re = regex::Regex::new(r#"CURRENT_PROJECT_VERSION = .*;"#).unwrap();
-    let caps = re.captures(&new_contents)
+    let re = regex::Regex::new(r#"CURRENT_PROJECT_VERSION = (.*);"#).unwrap();
+    let caps_pv = re.captures(&new_contents)
         .context(format!("failed to find CURRENT_PROJECT_VERSION in file {}", p))?;
+
+    // Calculate next project version
+    let next_project_version = if is_calver {
+        // CalVer: always increment from current value
+        let current: u64 = caps_pv[1].trim().parse().unwrap_or(0);
+        (current + 1).to_string()
+    } else {
+        // Semver: translate pre-release identifiers to numbers
+        let pre_release_version = match caps.get(2) {
+            Some(pre_release) => pre_release.as_str(),
+            None => "",
+        };
+
+        // App Store Connect is very limited in what it allows for version numbers. It only allows 3 period-separated
+        // numbers, and the first number must be greater than 0. It also does not allow any pre-release or build metadata.
+        // To account for this, we only support alpha, beta and rc pre-release ids, and translate them to numbers
+        // from 1 to 3.
+        // Any other pre-release ids will have a number of 4.
+        // If no pre release id is provided, <pre_id>.<pre_id_number> will default to 5.0
+        // which means it's not a pre release.
+        match pre_release_version {
+            "" => "5.0".to_string(),
+            _ => {
+                let pre_release_components = pre_release_version.split(".").collect::<Vec<&str>>();
+                let next_project_version_id = match pre_release_components[0] {
+                    "alpha" => 1,
+                    "beta" => 2,
+                    "rc" => 3,
+                    _ => 4,
+                };
+
+                format!("{}.{}", next_project_version_id, pre_release_components[1])
+            }
+        }
+    };
+
     // Replace CURRENT_PROJECT_VERSION with the new version
     let new_contents = new_contents
-        .replace(&caps[0], &format!("CURRENT_PROJECT_VERSION = {};", next_project_version));
+        .replace(&caps_pv[0], &format!("CURRENT_PROJECT_VERSION = {};", next_project_version));
 
     // Erase contents of the file first to avoid issues with the new contents being shorter than the old contents
     xcode_project.set_len(0)
@@ -561,11 +571,12 @@ mod tests {
         bump_ios(
             &"2.0.0".to_string(),
             &dir.path().join("myapp").to_str().unwrap().to_string(),
+            false,
         ).unwrap();
 
         let contents = fs::read_to_string(&file_path).unwrap();
         assert!(contents.contains("MARKETING_VERSION = 2.0.0;"));
-        // No pre-release → project version 5.0
+        // No pre-release, semver mode: project version 5.0
         assert!(contents.contains("CURRENT_PROJECT_VERSION = 5.0;"));
     }
 
@@ -583,14 +594,90 @@ mod tests {
 "#;
         fs::write(&file_path, content).unwrap();
 
-        // alpha → 1, beta → 2, rc → 3
         bump_ios(
             &"2.0.0-rc.3".to_string(),
             &dir.path().join("myapp").to_str().unwrap().to_string(),
+            false,
         ).unwrap();
 
         let contents = fs::read_to_string(&file_path).unwrap();
         assert!(contents.contains("MARKETING_VERSION = 2.0.0;"));
         assert!(contents.contains("CURRENT_PROJECT_VERSION = 3.3;"));
+    }
+
+    #[test]
+    fn bump_ios_calver_increments_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let proj_dir = dir.path().join("myapp.xcodeproj");
+        fs::create_dir_all(&proj_dir).unwrap();
+        let file_path = proj_dir.join("project.pbxproj");
+        let content = r#"
+    buildSettings = {
+        CURRENT_PROJECT_VERSION = 7;
+        MARKETING_VERSION = 2026.4.0;
+    };
+"#;
+        fs::write(&file_path, content).unwrap();
+
+        bump_ios(
+            &"2026.4.1".to_string(),
+            &dir.path().join("myapp").to_str().unwrap().to_string(),
+            true,
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("MARKETING_VERSION = 2026.4.1;"));
+        assert!(contents.contains("CURRENT_PROJECT_VERSION = 8;"));
+    }
+
+    #[test]
+    fn bump_ios_calver_starting_from_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let proj_dir = dir.path().join("myapp.xcodeproj");
+        fs::create_dir_all(&proj_dir).unwrap();
+        let file_path = proj_dir.join("project.pbxproj");
+        let content = r#"
+    buildSettings = {
+        CURRENT_PROJECT_VERSION = 0;
+        MARKETING_VERSION = 0.0.0;
+    };
+"#;
+        fs::write(&file_path, content).unwrap();
+
+        bump_ios(
+            &"2026.4.0".to_string(),
+            &dir.path().join("myapp").to_str().unwrap().to_string(),
+            true,
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("MARKETING_VERSION = 2026.4.0;"));
+        assert!(contents.contains("CURRENT_PROJECT_VERSION = 1;"));
+    }
+
+    #[test]
+    fn bump_ios_semver_stable_does_not_change_in_calver_mode() {
+        // Ensure semver mode still works correctly alongside calver
+        let dir = tempfile::tempdir().unwrap();
+        let proj_dir = dir.path().join("myapp.xcodeproj");
+        fs::create_dir_all(&proj_dir).unwrap();
+        let file_path = proj_dir.join("project.pbxproj");
+        let content = r#"
+    buildSettings = {
+        CURRENT_PROJECT_VERSION = 5.0;
+        MARKETING_VERSION = 1.0.0;
+    };
+"#;
+        fs::write(&file_path, content).unwrap();
+
+        bump_ios(
+            &"1.1.0".to_string(),
+            &dir.path().join("myapp").to_str().unwrap().to_string(),
+            false,
+        ).unwrap();
+
+        let contents = fs::read_to_string(&file_path).unwrap();
+        assert!(contents.contains("MARKETING_VERSION = 1.1.0;"));
+        assert!(contents.contains("CURRENT_PROJECT_VERSION = 5.0;"));
     }
 }

@@ -3,6 +3,8 @@ use anyhow::{Result, bail};
 use inquire::{Select, Text, MultiSelect, Confirm};
 
 struct SetupConfig {
+    versioning: String,
+    calver_format: String,
     tag_prefix: String,
     release_message: String,
     changelog_file: String,
@@ -15,6 +17,8 @@ struct BumpFileEntry {
     path: String,
     build_metadata: bool,
     package: bool,
+    versioning: String,
+    calver_format: String,
 }
 
 pub fn interactive_setup() -> Result<()> {
@@ -32,10 +36,46 @@ pub fn interactive_setup() -> Result<()> {
 
     println!("\nWelcome to donder-release setup\n");
 
+    // Versioning scheme
+    let versioning = Select::new(
+        "Versioning scheme:",
+        vec!["semver", "calver"],
+    )
+    .with_help_message("semver: semantic versioning (1.0.0), calver: calendar versioning (2026.4.0)")
+    .prompt()?;
+
+    let calver_format = if versioning == "calver" {
+        let format_options = vec![
+            ("YYYY.MM.MICRO",  "e.g. 2026.4.0"),
+            ("YYYY.0M.MICRO", "e.g. 2026.04.0"),
+            ("YY.MM.MICRO",    "e.g. 26.4.0"),
+            ("YY.0M.MICRO",   "e.g. 26.04.0"),
+            ("YYYY.WW.MICRO",  "e.g. 2026.15.0"),
+            ("YYYY.0W.MICRO", "e.g. 2026.15.0"),
+        ];
+
+        let labels: Vec<String> = format_options.iter()
+            .map(|(fmt, ex)| format!("{} ({})", fmt, ex))
+            .collect();
+
+        let selected = Select::new("CalVer format:", labels.clone())
+            .with_help_message("MICRO auto-increments per release, 0M/0W are zero-padded")
+            .prompt()?;
+
+        // Extract the format from the label
+        format_options[labels.iter().position(|l| l == &selected).unwrap()].0.to_string()
+    } else {
+        String::new()
+    };
+
     // Tag prefix
-    let tag_prefix = Text::new("Tag prefix:")
-        .with_default("v")
-        .with_help_message("Prefix for release tags (e.g. v1.0.0)")
+    let prefix_help = if versioning == "calver" {
+        "Prefix for release tags (e.g. v for v2026.4.0, or empty for 2026.4.0)"
+    } else {
+        "Prefix for release tags (e.g. v for v1.0.0, or empty for 1.0.0)"
+    };
+    let tag_prefix = Text::new("Tag prefix (leave empty for none):")
+        .with_help_message(prefix_help)
         .prompt()?;
 
     // Release message
@@ -82,9 +122,42 @@ pub fn interactive_setup() -> Result<()> {
                 _ => {
                     Confirm::new(&format!("Include build metadata for '{}'?", name))
                         .with_default(false)
-                        .with_help_message("Appends an auto-incrementing build number (e.g. 1.0.0+1)")
+                        .with_help_message("Appends an auto-incrementing build number (e.g. +1, +2)")
                         .prompt()?
                 }
+            };
+
+            let use_global = Confirm::new(&format!("Use global versioning ({}) for '{}'?", versioning, name))
+                .with_default(true)
+                .prompt()?;
+
+            let (pkg_versioning, pkg_calver_format) = if use_global {
+                (String::new(), String::new())
+            } else {
+                let v = Select::new(
+                    &format!("Versioning for '{}':", name),
+                    vec!["semver", "calver"],
+                ).prompt()?;
+
+                let cf = if v == "calver" {
+                    let format_options = vec![
+                        ("YYYY.MM.MICRO",  "e.g. 2026.4.0"),
+                        ("YYYY.0M.MICRO", "e.g. 2026.04.0"),
+                        ("YY.MM.MICRO",    "e.g. 26.4.0"),
+                        ("YY.0M.MICRO",   "e.g. 26.04.0"),
+                        ("YYYY.WW.MICRO",  "e.g. 2026.15.0"),
+                        ("YYYY.0W.MICRO", "e.g. 2026.15.0"),
+                    ];
+                    let labels: Vec<String> = format_options.iter()
+                        .map(|(fmt, ex)| format!("{} ({})", fmt, ex))
+                        .collect();
+                    let selected = Select::new(&format!("CalVer format for '{}':", name), labels.clone()).prompt()?;
+                    format_options[labels.iter().position(|l| l == &selected).unwrap()].0.to_string()
+                } else {
+                    String::new()
+                };
+
+                (v.to_string(), cf)
             };
 
             bump_files.push(BumpFileEntry {
@@ -92,6 +165,8 @@ pub fn interactive_setup() -> Result<()> {
                 path,
                 build_metadata,
                 package: true,
+                versioning: pkg_versioning,
+                calver_format: pkg_calver_format,
             });
         }
     } else {
@@ -119,7 +194,7 @@ pub fn interactive_setup() -> Result<()> {
                 _ => {
                     Confirm::new(&format!("Include build metadata for {}?", target))
                         .with_default(false)
-                        .with_help_message("Appends an auto-incrementing build number (e.g. 1.0.0+1)")
+                        .with_help_message("Appends an auto-incrementing build number (e.g. +1, +2)")
                         .prompt()?
                 }
             };
@@ -129,6 +204,8 @@ pub fn interactive_setup() -> Result<()> {
                 path,
                 build_metadata,
                 package: false,
+                versioning: String::new(),
+                calver_format: String::new(),
             });
         }
     }
@@ -181,14 +258,20 @@ pub fn interactive_setup() -> Result<()> {
         String::new()
     };
 
-    // Clean pre-releases
-    let clean_pre_releases = Confirm::new("Clean pre-releases when a stable release is published?")
-        .with_default(false)
-        .with_help_message("Deletes pre-release tags and GitHub releases")
-        .prompt()?;
+    // Clean pre-releases (only for semver)
+    let clean_pre_releases = if versioning == "semver" {
+        Confirm::new("Clean pre-releases when a stable release is published?")
+            .with_default(false)
+            .with_help_message("Deletes pre-release tags and GitHub releases")
+            .prompt()?
+    } else {
+        false
+    };
 
     // Build YAML
     let config = build_config(SetupConfig {
+        versioning: versioning.to_string(),
+        calver_format,
         tag_prefix,
         release_message,
         changelog_file,
@@ -206,6 +289,10 @@ pub fn interactive_setup() -> Result<()> {
 fn build_config(config: SetupConfig, custom_types: Vec<(String, String, String)>) -> String {
     let mut yaml = String::from("# Configuration file for donder-release\n\n");
 
+    yaml.push_str(&format!("versioning: {}\n", config.versioning));
+    if !config.calver_format.is_empty() {
+        yaml.push_str(&format!("calver_format: {}\n", config.calver_format));
+    }
     yaml.push_str(&format!("tag_prefix: {}\n", config.tag_prefix));
     yaml.push_str(&format!("release_message: \"{}\"\n", config.release_message));
 
@@ -238,6 +325,12 @@ fn build_config(config: SetupConfig, custom_types: Vec<(String, String, String)>
         if file.package {
             props.push_str(", package: true");
         }
+        if !file.versioning.is_empty() {
+            props.push_str(&format!(", versioning: {}", file.versioning));
+        }
+        if !file.calver_format.is_empty() {
+            props.push_str(&format!(", calver_format: {}", file.calver_format));
+        }
         yaml.push_str(&format!("  - {{ {} }}\n", props));
     }
 
@@ -251,15 +344,19 @@ mod tests {
     #[test]
     fn build_config_basic() {
         let config = build_config(SetupConfig {
+            versioning: "semver".to_string(),
+            calver_format: String::new(),
             tag_prefix: "v".to_string(),
             release_message: "chore(release): %s".to_string(),
             changelog_file: String::new(),
             clean_pre_releases: false,
             bump_files: vec![
-                BumpFileEntry { target: "cargo".to_string(), path: "<root>".to_string(), build_metadata: false, package: false },
+                BumpFileEntry { target: "cargo".to_string(), path: "<root>".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
             ],
         }, vec![]);
 
+        assert!(config.contains("versioning: semver"));
+        assert!(!config.contains("calver_format"));
         assert!(config.contains("tag_prefix: v"));
         assert!(config.contains("release_message: \"chore(release): %s\""));
         assert!(config.contains("- { target: cargo, path: <root> }"));
@@ -270,13 +367,15 @@ mod tests {
     #[test]
     fn build_config_with_all_options() {
         let config = build_config(SetupConfig {
+            versioning: "semver".to_string(),
+            calver_format: String::new(),
             tag_prefix: "v".to_string(),
             release_message: "chore(release): %s".to_string(),
             changelog_file: "CHANGELOG.md".to_string(),
             clean_pre_releases: true,
             bump_files: vec![
-                BumpFileEntry { target: "cargo".to_string(), path: "<root>".to_string(), build_metadata: false, package: false },
-                BumpFileEntry { target: "npm".to_string(), path: "<root>".to_string(), build_metadata: true, package: false },
+                BumpFileEntry { target: "cargo".to_string(), path: "<root>".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
+                BumpFileEntry { target: "npm".to_string(), path: "<root>".to_string(), build_metadata: true, package: false, versioning: String::new(), calver_format: String::new() },
             ],
         }, vec![
             ("perf".to_string(), "patch".to_string(), "Performance Improvements".to_string()),
@@ -290,17 +389,37 @@ mod tests {
     }
 
     #[test]
-    fn build_config_multiple_targets() {
+    fn build_config_calver() {
         let config = build_config(SetupConfig {
+            versioning: "calver".to_string(),
+            calver_format: "YYYY.MM.MICRO".to_string(),
             tag_prefix: "v".to_string(),
             release_message: "chore(release): %s".to_string(),
             changelog_file: String::new(),
             clean_pre_releases: false,
             bump_files: vec![
-                BumpFileEntry { target: "cargo".to_string(), path: "<root>".to_string(), build_metadata: false, package: false },
-                BumpFileEntry { target: "npm".to_string(), path: "<root>".to_string(), build_metadata: false, package: false },
-                BumpFileEntry { target: "android".to_string(), path: "android".to_string(), build_metadata: false, package: false },
-                BumpFileEntry { target: "ios".to_string(), path: "ios/MyApp".to_string(), build_metadata: false, package: false },
+                BumpFileEntry { target: "npm".to_string(), path: "<root>".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
+            ],
+        }, vec![]);
+
+        assert!(config.contains("versioning: calver"));
+        assert!(config.contains("calver_format: YYYY.MM.MICRO"));
+    }
+
+    #[test]
+    fn build_config_multiple_targets() {
+        let config = build_config(SetupConfig {
+            versioning: "semver".to_string(),
+            calver_format: String::new(),
+            tag_prefix: "v".to_string(),
+            release_message: "chore(release): %s".to_string(),
+            changelog_file: String::new(),
+            clean_pre_releases: false,
+            bump_files: vec![
+                BumpFileEntry { target: "cargo".to_string(), path: "<root>".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
+                BumpFileEntry { target: "npm".to_string(), path: "<root>".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
+                BumpFileEntry { target: "android".to_string(), path: "android".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
+                BumpFileEntry { target: "ios".to_string(), path: "ios/MyApp".to_string(), build_metadata: false, package: false, versioning: String::new(), calver_format: String::new() },
             ],
         }, vec![]);
 
@@ -313,17 +432,38 @@ mod tests {
     #[test]
     fn build_config_monorepo_packages() {
         let config = build_config(SetupConfig {
+            versioning: "semver".to_string(),
+            calver_format: String::new(),
             tag_prefix: "v".to_string(),
             release_message: "chore(release): %s".to_string(),
             changelog_file: String::new(),
             clean_pre_releases: false,
             bump_files: vec![
-                BumpFileEntry { target: "npm".to_string(), path: "packages/api".to_string(), build_metadata: false, package: true },
-                BumpFileEntry { target: "npm".to_string(), path: "packages/web".to_string(), build_metadata: false, package: true },
+                BumpFileEntry { target: "npm".to_string(), path: "packages/api".to_string(), build_metadata: false, package: true, versioning: String::new(), calver_format: String::new() },
+                BumpFileEntry { target: "npm".to_string(), path: "packages/web".to_string(), build_metadata: false, package: true, versioning: String::new(), calver_format: String::new() },
             ],
         }, vec![]);
 
         assert!(config.contains("- { target: npm, path: packages/api, package: true }"));
         assert!(config.contains("- { target: npm, path: packages/web, package: true }"));
+    }
+
+    #[test]
+    fn build_config_monorepo_per_package_versioning() {
+        let config = build_config(SetupConfig {
+            versioning: "semver".to_string(),
+            calver_format: String::new(),
+            tag_prefix: "v".to_string(),
+            release_message: "chore(release): %s".to_string(),
+            changelog_file: String::new(),
+            clean_pre_releases: false,
+            bump_files: vec![
+                BumpFileEntry { target: "npm".to_string(), path: "packages/api".to_string(), build_metadata: false, package: true, versioning: "semver".to_string(), calver_format: String::new() },
+                BumpFileEntry { target: "npm".to_string(), path: "packages/app".to_string(), build_metadata: false, package: true, versioning: "calver".to_string(), calver_format: "YYYY.MM.MICRO".to_string() },
+            ],
+        }, vec![]);
+
+        assert!(config.contains("- { target: npm, path: packages/api, package: true, versioning: semver }"));
+        assert!(config.contains("- { target: npm, path: packages/app, package: true, versioning: calver, calver_format: YYYY.MM.MICRO }"));
     }
 }

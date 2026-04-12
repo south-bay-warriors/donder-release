@@ -131,9 +131,15 @@ impl Git {
 
         let mut tags = output.split_whitespace().collect::<Vec<&str>>();
 
-        tags.retain(
-                |tag| tag.starts_with(prefix) && Version::parse(&tag.replace(prefix, "")).is_ok()
-            );
+        tags.retain(|tag| {
+            if !tag.starts_with(prefix) {
+                return false;
+            }
+            let version_str = tag.replace(prefix, "");
+            // Accept semver or CalVer (digits, dots, and optional pre-release)
+            Version::parse(&version_str).is_ok()
+                || version_str.split('.').count() == 3
+        });
 
         // map tags to tag info
         let mut tags_info = tags
@@ -141,8 +147,8 @@ impl Git {
             .map(|tag| ReleaseInfo::new(tag, prefix, false))
             .collect::<Vec<ReleaseInfo>>();
 
-        // sort tags by version
-        tags_info.sort_by(|a, b| b.version.cmp(&a.version));
+        // sort tags by version string descending (works for both semver and CalVer)
+        tags_info.sort_by(|a, b| b.version_str.cmp(&a.version_str));
 
         Ok(tags_info)
     }
@@ -326,6 +332,7 @@ impl Drop for Git {
 #[derive(Debug)]
 pub struct ReleaseInfo {
     pub version: Version,
+    pub version_str: String,
     pub prefix: String,
     pub head: String,
     pub initial: bool,
@@ -333,8 +340,12 @@ pub struct ReleaseInfo {
 
 impl ReleaseInfo {
     pub fn new(tag: &str, prefix: &str, initial: bool) -> Self {
+        let version_str = tag.replace(prefix, "");
+        // Try semver parse, fallback to 0.0.0 for CalVer tags with zero-padded segments
+        let version = Version::parse(&version_str).unwrap_or(Version::new(0, 0, 0));
         Self {
-            version: Version::parse(&tag.replace(&prefix, "")).unwrap(),
+            version,
+            version_str,
             prefix: prefix.to_string(),
             head: "".to_string(),
             initial,
@@ -342,7 +353,7 @@ impl ReleaseInfo {
     }
 
     pub fn tag(&self) -> String {
-        format!("{}{}", self.prefix, self.version)
+        format!("{}{}", self.prefix, self.version_str)
     }
 
     pub fn update_head(&mut self, head: &str) {

@@ -67,6 +67,12 @@ tag_prefix: v
 
 #[derive(Debug, Deserialize)]
 pub struct Ctx {
+    /// Versioning scheme: "semver" or "calver"
+    #[serde(default = "default_versioning")]
+    pub versioning: String,
+    /// CalVer format string (e.g. "YYYY.MM.MICRO")
+    #[serde(default)]
+    pub calver_format: String,
     /// Release message of the release commit
     #[serde(default = "default_release_message")]
     pub release_message: String,
@@ -107,6 +113,10 @@ pub struct Ctx {
     pub packages: Vec<Pkg>,
 }
 
+fn default_versioning() -> String {
+    "semver".to_string()
+}
+
 fn default_release_message() -> String {
     "chore(release): %s".to_string()
 }
@@ -137,6 +147,39 @@ impl Ctx {
         let file = fs::File::open(config_path).expect("could not open file");
         let input_config: Ctx = serde_yml::from_reader(file)
             .expect("failed to parse file");
+
+        // Validate versioning scheme
+        if input_config.versioning != "semver" && input_config.versioning != "calver" {
+            bail!("versioning must be 'semver' or 'calver'");
+        }
+
+        // Validate CalVer configuration
+        if input_config.versioning == "calver" {
+            if input_config.calver_format.is_empty() {
+                bail!("calver_format must be set when versioning is 'calver'");
+            }
+
+            let segments: Vec<&str> = input_config.calver_format.split('.').collect();
+            if segments.len() != 3 {
+                bail!("calver_format must have exactly 3 dot-separated segments (e.g. YYYY.MM.MICRO)");
+            }
+
+            let valid_segments = ["YYYY", "YY", "0Y", "MM", "0M", "DD", "0D", "WW", "0W", "MICRO"];
+            for segment in &segments {
+                if !valid_segments.contains(segment) {
+                    bail!("invalid calver_format segment '{}', valid segments: {}", segment, valid_segments.join(", "));
+                }
+            }
+
+            if !segments.contains(&"MICRO") {
+                bail!("calver_format must contain a MICRO segment");
+            }
+
+            if !pre_id.is_empty() {
+                bail!("pre-releases are not supported with CalVer versioning");
+            }
+        }
+
         let mut default_types = vec![
             ReleaseType {
                 commit_type: "feat".to_string(),
@@ -199,12 +242,18 @@ impl Ctx {
 
         let mut packages = HashMap::new();
 
+        // Resolve versioning: per-package or global fallback
+        let global_versioning = &input_config.versioning;
+        let global_calver_format = &input_config.calver_format;
+
         packages.insert(
             "root".to_string(),
             Pkg::new("".to_string(),
                 "".to_string(),
                 input_config.tag_prefix.clone(),
                 vec![],
+                global_versioning.clone(),
+                global_calver_format.clone(),
             )?,
         );
 
@@ -219,6 +268,18 @@ impl Ctx {
                 bail!("unsupported bump file target");
             }
 
+            // Per-package versioning: use bump_file override or global fallback
+            let pkg_versioning = if bump_file.versioning.is_empty() {
+                global_versioning.clone()
+            } else {
+                bump_file.versioning.clone()
+            };
+            let pkg_calver_format = if bump_file.calver_format.is_empty() {
+                global_calver_format.clone()
+            } else {
+                bump_file.calver_format.clone()
+            };
+
             // Build packages list
             if bump_file.package {
                 // get package name from bump file path string
@@ -227,7 +288,7 @@ impl Ctx {
                 if segments.len() < 2 {
                     bail!("invalid bump file path for a package");
                 }
-                
+
                 // package name should be the second to last segment
                 let package_name = segments[segments.len() - 2].to_string();
 
@@ -236,10 +297,11 @@ impl Ctx {
                         package_name.clone(),
                         Pkg::new(
                             package_name.clone(),
-                            // join all segments except the last one to get the root path of the package
                             segments[..segments.len() - 1].join("/"),
                             input_config.tag_prefix.clone(),
                             vec![bump_file.clone()],
+                            pkg_versioning,
+                            pkg_calver_format,
                         )?,
                     );
                 } else {
@@ -426,5 +488,105 @@ types:
         let ctx = result.unwrap();
         let feat_type = ctx.types.iter().find(|t| t.commit_type == "feat").unwrap();
         assert_eq!(feat_type.section, "New Features");
+    }
+
+    // CalVer validation tests
+
+    #[test]
+    fn ctx_calver_valid_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: calver
+calver_format: YYYY.MM.MICRO
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_ok());
+        let ctx = result.unwrap();
+        assert_eq!(ctx.versioning, "calver");
+        assert_eq!(ctx.calver_format, "YYYY.MM.MICRO");
+    }
+
+    #[test]
+    fn ctx_calver_missing_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: calver
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("calver_format must be set"));
+    }
+
+    #[test]
+    fn ctx_calver_rejects_two_segments() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: calver
+calver_format: YYYY.MICRO
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("exactly 3 dot-separated segments"));
+    }
+
+    #[test]
+    fn ctx_calver_rejects_no_micro() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: calver
+calver_format: YYYY.MM.DD
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must contain a MICRO segment"));
+    }
+
+    #[test]
+    fn ctx_calver_rejects_invalid_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: calver
+calver_format: YYYY.QUARTER.MICRO
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid calver_format segment"));
+    }
+
+    #[test]
+    fn ctx_calver_rejects_pre_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: calver
+calver_format: YYYY.MM.MICRO
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "beta".to_string(), true, vec![]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("pre-releases are not supported with CalVer"));
+    }
+
+    #[test]
+    fn ctx_invalid_versioning() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = write_config(dir.path(), r#"
+versioning: gitver
+bump_files:
+  - { target: cargo, path: "<root>" }
+"#);
+        let result = Ctx::new(config, "".to_string(), true, vec![]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("versioning must be 'semver' or 'calver'"));
     }
 }
