@@ -276,11 +276,8 @@ impl Ctx {
             bail!("GH_TOKEN environment variable is not defined");
         }
 
-        let git_api = Git::new(
-            &token,
-            &std::env::var("GIT_AUTHOR_NAME").unwrap_or("sbayw-bot".to_string()),
-            &std::env::var("GIT_AUTHOR_EMAIL").unwrap_or("support@southbaywarriors.com".to_string()),
-        ).context("failed to create git api")?;
+        let git_api = Git::new(&token)
+            .context("failed to create git api")?;
 
         let github_api = GithubApi::new(
             &token,

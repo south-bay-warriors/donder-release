@@ -13,8 +13,41 @@ pub struct Git {
     pub repo: String,
 }
 
+/// Resolves value from environment variables with cross-fallback.
+/// Tries `primary` env var first, then `fallback`, then returns the default.
+fn resolve_env(primary: &str, fallback: &str, default: &str) -> String {
+    std::env::var(primary)
+        .or_else(|_| std::env::var(fallback))
+        .unwrap_or(default.to_string())
+}
+
+const DEFAULT_NAME: &str = "sbayw-bot";
+const DEFAULT_EMAIL: &str = "support@southbaywarriors.com";
+
 impl Git {
-    pub fn new(token: &str, author: &str, email: &str) -> Result<Self> {
+    pub fn new(token: &str) -> Result<Self> {
+        // Resolve git identity from environment variables with cross-fallback
+        let author = resolve_env("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME", DEFAULT_NAME);
+        let email = resolve_env("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL", DEFAULT_EMAIL);
+
+        // Set any missing identity env vars so git picks them up.
+        // This ensures git commit works in environments without a global git config (e.g. CI runners).
+        // Safety: called during single-threaded initialization before tokio runtime starts.
+        unsafe {
+            if std::env::var("GIT_AUTHOR_NAME").is_err() {
+                std::env::set_var("GIT_AUTHOR_NAME", &author);
+            }
+            if std::env::var("GIT_AUTHOR_EMAIL").is_err() {
+                std::env::set_var("GIT_AUTHOR_EMAIL", &email);
+            }
+            if std::env::var("GIT_COMMITTER_NAME").is_err() {
+                std::env::set_var("GIT_COMMITTER_NAME", &author);
+            }
+            if std::env::var("GIT_COMMITTER_EMAIL").is_err() {
+                std::env::set_var("GIT_COMMITTER_EMAIL", &email);
+            }
+        }
+
         let origin_url = Command::new("git")
             .arg("config")
             .arg("--get")
@@ -32,8 +65,8 @@ impl Git {
             Self {
                 repo_url: format!("https://{}@{}/{}/{}.git", token, &caps[2], &caps[4], &caps[5]),
                 token: token.to_string(),
-                author: author.to_string(),
-                email: email.to_string(),
+                author,
+                email,
                 owner: caps[4].to_string(),
                 repo: caps[5].to_string(),
             }
@@ -364,5 +397,39 @@ mod tests {
         assert!(c.hash.is_empty());
         assert!(c.subject.is_empty());
         assert!(c.body.is_empty());
+    }
+
+    // resolve_env tests
+
+    #[test]
+    fn resolve_env_returns_primary() {
+        unsafe { std::env::set_var("TEST_PRIMARY_1", "primary_val"); }
+        unsafe { std::env::set_var("TEST_FALLBACK_1", "fallback_val"); }
+
+        let result = resolve_env("TEST_PRIMARY_1", "TEST_FALLBACK_1", "default");
+        assert_eq!(result, "primary_val");
+
+        unsafe { std::env::remove_var("TEST_PRIMARY_1"); }
+        unsafe { std::env::remove_var("TEST_FALLBACK_1"); }
+    }
+
+    #[test]
+    fn resolve_env_falls_back_to_secondary() {
+        unsafe { std::env::remove_var("TEST_PRIMARY_2"); }
+        unsafe { std::env::set_var("TEST_FALLBACK_2", "fallback_val"); }
+
+        let result = resolve_env("TEST_PRIMARY_2", "TEST_FALLBACK_2", "default");
+        assert_eq!(result, "fallback_val");
+
+        unsafe { std::env::remove_var("TEST_FALLBACK_2"); }
+    }
+
+    #[test]
+    fn resolve_env_returns_default() {
+        unsafe { std::env::remove_var("TEST_PRIMARY_3"); }
+        unsafe { std::env::remove_var("TEST_FALLBACK_3"); }
+
+        let result = resolve_env("TEST_PRIMARY_3", "TEST_FALLBACK_3", "default_val");
+        assert_eq!(result, "default_val");
     }
 }
