@@ -1,6 +1,6 @@
 {
   "name": "donder-release-cli",
-  "version": "1.5.2",
+  "version": "1.5.3-beta.0",
   "description": "Quickly create releases on Github from the command line or CI using conventional commits.",
   "repository": {
     "type": "git",
