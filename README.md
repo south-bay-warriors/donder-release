@@ -6,6 +6,8 @@
 
 <br />
 
+> Upgrading from v1? See the [migration guide](docs/MIGRATION_V2.md).
+
 ## Installation
 
 #### With Cargo
@@ -22,13 +24,15 @@ npm install -g donder-release-cli
 
 ## Quick start
 
-Initialize a configuration file in your project:
+Set up a configuration file in your project:
 
 ```bash
-donder-release --init
-```
+# Interactive wizard
+donder-release --setup
 
-This creates a `donder-release.yaml` file with commented examples for all options.
+# Or write a default config without prompts
+donder-release --skip-interactive
+```
 
 Preview a release without publishing:
 
@@ -45,17 +49,33 @@ donder-release
 ## CLI options
 
 ```
--i, --init           Initialize configuration file
--c, --config <FILE>  Configuration file path [default: donder-release.yaml]
--p, --packages       Comma-separated list of monorepo packages to release
-    --pre-id <ID>    Pre-release identifier (e.g. alpha, beta, rc)
-    --dry-run        Preview a pending release without publishing
--v, --version        Output CLI version
+-s, --setup              Interactive configuration setup wizard
+    --skip-interactive   Write default configuration file without prompts
+-c, --config <FILE>      Configuration file path [default: donder-release.yaml]
+-p, --packages           Comma-separated list of monorepo packages to release
+    --pre-id <ID>        Pre-release identifier (e.g. alpha, beta, rc)
+    --dry-run            Preview a pending release without publishing
+-v, --version            Output CLI version
 ```
 
 ## Configuration
 
 All configuration is done in `donder-release.yaml`.
+
+### versioning
+
+Versioning scheme for your project. Defaults to `semver`.
+
+```yaml
+# Semantic versioning (default)
+versioning: semver
+
+# Calendar versioning
+versioning: calver
+calver_format: YYYY.MM.MICRO
+```
+
+See [CalVer](#calendar-versioning-calver) for details.
 
 ### release_message
 
@@ -118,6 +138,8 @@ For example, a release of `1.2.0-beta.3` sets:
 - `MARKETING_VERSION = 1.2.0`
 - `CURRENT_PROJECT_VERSION = 2.3`
 
+In CalVer mode, `CURRENT_PROJECT_VERSION` is always incremented from the current value in the file.
+
 #### Build metadata
 
 Append an auto-incrementing build number to the version:
@@ -139,7 +161,7 @@ changelog_file: CHANGELOG.md
 
 ### clean_pre_releases
 
-Delete pre-release tags and GitHub releases when a stable release is published:
+Delete pre-release tags and GitHub releases when a stable release is published (semver only):
 
 ```yaml
 clean_pre_releases: true
@@ -161,9 +183,48 @@ Release specific packages:
 donder-release --packages api,web
 ```
 
+#### Per-package versioning
+
+In monorepos, each package can use its own versioning scheme:
+
+```yaml
+versioning: semver
+bump_files:
+  - { target: npm, path: packages/api, package: true }
+  - { target: npm, path: packages/app, package: true, versioning: calver, calver_format: YYYY.MM.MICRO }
+```
+
+Packages without a versioning override inherit the global setting.
+
+## Calendar versioning (CalVer)
+
+Date-based versioning for projects where releases are time-driven (mobile apps, services, infrastructure).
+
+```yaml
+versioning: calver
+calver_format: YYYY.MM.MICRO
+```
+
+Supported format segments:
+
+| Segment | Description | Example |
+|---|---|---|
+| `YYYY` | Full year | 2026 |
+| `YY` | Short year | 26 |
+| `0Y` | Zero-padded year | 06 |
+| `MM` | Short month | 1-12 |
+| `0M` | Zero-padded month | 01-12 |
+| `WW` | Week number | 1-52 |
+| `0W` | Zero-padded week | 01-52 |
+| `MICRO` | Auto-incrementing counter | 0, 1, 2... |
+
+The format must have exactly 3 dot-separated segments, one of which must be `MICRO`. MICRO resets to 0 when the calendar segment changes (e.g. new month).
+
+Pre-releases are not supported with CalVer. Breaking changes are tracked in the changelog but do not affect the version number.
+
 ## Pre-releases
 
-Create pre-release versions with the `--pre-id` flag:
+Create pre-release versions with the `--pre-id` flag (semver only):
 
 ```bash
 donder-release --pre-id alpha  # 1.0.1-alpha.0
@@ -175,13 +236,13 @@ Subsequent pre-releases auto-increment: `1.0.1-alpha.0` -> `1.0.1-alpha.1`.
 
 ## Environment variables
 
-| Variable              | Description                                            | Default                             |
-| --------------------- | ------------------------------------------------------ | ----------------------------------- |
-| `GH_TOKEN`            | GitHub personal access token (required for publishing) |                                     |
-| `GIT_AUTHOR_NAME`     | Git author name                                        | `sbayw-bot`                         |
-| `GIT_AUTHOR_EMAIL`    | Git author email                                       | `<sbayw-bot current primary email>` |
-| `GIT_COMMITTER_NAME`  | Git committer name                                     | Falls back to `GIT_AUTHOR_NAME`     |
-| `GIT_COMMITTER_EMAIL` | Git committer email                                    | Falls back to `GIT_AUTHOR_EMAIL`    |
+| Variable | Description | Default |
+|---|---|---|
+| `GH_TOKEN` | GitHub personal access token (required for publishing) | |
+| `GIT_AUTHOR_NAME` | Git author name | `sbayw-bot` |
+| `GIT_AUTHOR_EMAIL` | Git author email | `<sbayw-bot current primary email>` |
+| `GIT_COMMITTER_NAME` | Git committer name | Falls back to `GIT_AUTHOR_NAME` |
+| `GIT_COMMITTER_EMAIL` | Git committer email | Falls back to `GIT_AUTHOR_EMAIL` |
 
 Environment variables can be set in a `donder-release.env` file in your project root.
 
@@ -247,15 +308,12 @@ donder-release follows the [Conventional Commits 1.0.0](https://www.conventional
 [optional footer(s)]
 ```
 
-Version bumps are determined by commit type:
+Version bumps are determined by commit type (semver only):
 
-| Commit                    | Version bump           |
-| ------------------------- | ---------------------- |
-| `fix: ...`                | Patch (1.0.0 -> 1.0.1) |
-| `feat: ...`               | Minor (1.0.0 -> 1.1.0) |
-| `BREAKING CHANGE:` footer | Major (1.0.0 -> 2.0.0) |
+| Commit | Version bump |
+|---|---|
+| `fix: ...` | Patch (1.0.0 -> 1.0.1) |
+| `feat: ...` | Minor (1.0.0 -> 1.1.0) |
+| `feat!: ...` or `BREAKING CHANGE:` footer | Major (1.0.0 -> 2.0.0) |
 
-#### TODO
-
-- Footer links support
-- Add support to other git providers(?)
+In CalVer mode, all releasable commits increment the MICRO counter regardless of type.
