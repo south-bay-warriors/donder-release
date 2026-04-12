@@ -28,23 +28,27 @@ const DEFAULT_EMAIL: &str = "support@southbaywarriors.com";
 
 impl Git {
     pub fn new(token: &str) -> Result<Self> {
+        // Save original env var state before making any changes.
+        // Original values are restored when Git is dropped.
+        let env_keys = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+        let original_env: Vec<(String, Option<String>)> = env_keys
+            .iter()
+            .map(|key| (key.to_string(), std::env::var(key).ok()))
+            .collect();
+
         // Resolve git identity from environment variables with cross-fallback
         let author = resolve_env("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME", DEFAULT_NAME);
         let email = resolve_env("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL", DEFAULT_EMAIL);
 
-        // Save original env var values and set any missing identity vars so git picks them up.
+        // Set only missing identity env vars so git picks them up.
         // This ensures git commit works in environments without a global git config (e.g. CI runners).
-        // Original values are restored when Git is dropped.
-        let env_keys = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
-        let env_values = [&author, &email, &author, &email];
-        let mut original_env = Vec::new();
-
         // Safety: called during single-threaded initialization before tokio runtime starts.
+        let env_values = [&author, &email, &author, &email];
         unsafe {
             for (key, value) in env_keys.iter().zip(env_values.iter()) {
-                let original = std::env::var(key).ok();
-                original_env.push((key.to_string(), original));
-                std::env::set_var(key, value);
+                if std::env::var(key).is_err() {
+                    std::env::set_var(key, value);
+                }
             }
         }
 
@@ -419,33 +423,198 @@ mod tests {
 
     #[test]
     fn resolve_env_returns_primary() {
-        unsafe { std::env::set_var("TEST_PRIMARY_1", "primary_val"); }
-        unsafe { std::env::set_var("TEST_FALLBACK_1", "fallback_val"); }
+        let primary = "GIT_AUTHOR_NAME";
+        let fallback = "GIT_COMMITTER_NAME";
+        let orig_primary = std::env::var(primary).ok();
+        let orig_fallback = std::env::var(fallback).ok();
 
-        let result = resolve_env("TEST_PRIMARY_1", "TEST_FALLBACK_1", "default");
+        unsafe { std::env::set_var(primary, "primary_val"); }
+        unsafe { std::env::set_var(fallback, "fallback_val"); }
+
+        let result = resolve_env(primary, fallback, "default");
         assert_eq!(result, "primary_val");
 
-        unsafe { std::env::remove_var("TEST_PRIMARY_1"); }
-        unsafe { std::env::remove_var("TEST_FALLBACK_1"); }
+        unsafe {
+            match &orig_primary { Some(v) => std::env::set_var(primary, v), None => std::env::remove_var(primary) }
+            match &orig_fallback { Some(v) => std::env::set_var(fallback, v), None => std::env::remove_var(fallback) }
+        }
     }
 
     #[test]
     fn resolve_env_falls_back_to_secondary() {
-        unsafe { std::env::remove_var("TEST_PRIMARY_2"); }
-        unsafe { std::env::set_var("TEST_FALLBACK_2", "fallback_val"); }
+        let primary = "GIT_AUTHOR_EMAIL";
+        let fallback = "GIT_COMMITTER_EMAIL";
+        let orig_primary = std::env::var(primary).ok();
+        let orig_fallback = std::env::var(fallback).ok();
 
-        let result = resolve_env("TEST_PRIMARY_2", "TEST_FALLBACK_2", "default");
+        unsafe { std::env::remove_var(primary); }
+        unsafe { std::env::set_var(fallback, "fallback_val"); }
+
+        let result = resolve_env(primary, fallback, "default");
         assert_eq!(result, "fallback_val");
 
-        unsafe { std::env::remove_var("TEST_FALLBACK_2"); }
+        unsafe {
+            match &orig_primary { Some(v) => std::env::set_var(primary, v), None => std::env::remove_var(primary) }
+            match &orig_fallback { Some(v) => std::env::set_var(fallback, v), None => std::env::remove_var(fallback) }
+        }
     }
 
     #[test]
     fn resolve_env_returns_default() {
-        unsafe { std::env::remove_var("TEST_PRIMARY_3"); }
-        unsafe { std::env::remove_var("TEST_FALLBACK_3"); }
+        let primary = "GIT_COMMITTER_NAME";
+        let fallback = "GIT_AUTHOR_NAME";
+        let orig_primary = std::env::var(primary).ok();
+        let orig_fallback = std::env::var(fallback).ok();
 
-        let result = resolve_env("TEST_PRIMARY_3", "TEST_FALLBACK_3", "default_val");
+        unsafe { std::env::remove_var(primary); }
+        unsafe { std::env::remove_var(fallback); }
+
+        let result = resolve_env(primary, fallback, "default_val");
         assert_eq!(result, "default_val");
+
+        unsafe {
+            match &orig_primary { Some(v) => std::env::set_var(primary, v), None => std::env::remove_var(primary) }
+            match &orig_fallback { Some(v) => std::env::set_var(fallback, v), None => std::env::remove_var(fallback) }
+        }
+    }
+
+    // env var save/restore tests
+
+    fn make_git_with_env(original_env: Vec<(String, Option<String>)>) -> Git {
+        Git {
+            repo_url: String::new(),
+            token: String::new(),
+            author: String::new(),
+            email: String::new(),
+            owner: String::new(),
+            repo: String::new(),
+            original_env,
+        }
+    }
+
+    #[test]
+    fn drop_restores_git_author_name() {
+        let key = "GIT_AUTHOR_NAME";
+        let original = std::env::var(key).ok();
+
+        unsafe { std::env::set_var(key, "my-name"); }
+        let git = make_git_with_env(vec![(key.to_string(), Some("my-name".to_string()))]);
+
+        unsafe { std::env::set_var(key, "sbayw-bot"); }
+        drop(git);
+
+        assert_eq!(std::env::var(key).unwrap(), "my-name");
+
+        // Restore real original
+        unsafe {
+            match &original {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn drop_restores_git_author_email() {
+        let key = "GIT_AUTHOR_EMAIL";
+        let original = std::env::var(key).ok();
+
+        unsafe { std::env::set_var(key, "me@example.com"); }
+        let git = make_git_with_env(vec![(key.to_string(), Some("me@example.com".to_string()))]);
+
+        unsafe { std::env::set_var(key, "bot@example.com"); }
+        drop(git);
+
+        assert_eq!(std::env::var(key).unwrap(), "me@example.com");
+
+        unsafe {
+            match &original {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn drop_restores_git_committer_name() {
+        let key = "GIT_COMMITTER_NAME";
+        let original = std::env::var(key).ok();
+
+        unsafe { std::env::set_var(key, "my-name"); }
+        let git = make_git_with_env(vec![(key.to_string(), Some("my-name".to_string()))]);
+
+        unsafe { std::env::set_var(key, "sbayw-bot"); }
+        drop(git);
+
+        assert_eq!(std::env::var(key).unwrap(), "my-name");
+
+        unsafe {
+            match &original {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn drop_restores_git_committer_email() {
+        let key = "GIT_COMMITTER_EMAIL";
+        let original = std::env::var(key).ok();
+
+        unsafe { std::env::set_var(key, "me@example.com"); }
+        let git = make_git_with_env(vec![(key.to_string(), Some("me@example.com".to_string()))]);
+
+        unsafe { std::env::set_var(key, "bot@example.com"); }
+        drop(git);
+
+        assert_eq!(std::env::var(key).unwrap(), "me@example.com");
+
+        unsafe {
+            match &original {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn drop_removes_git_committer_name_if_was_undefined() {
+        let key = "GIT_COMMITTER_NAME";
+        let original = std::env::var(key).ok();
+
+        unsafe { std::env::remove_var(key); }
+        let git = make_git_with_env(vec![(key.to_string(), None)]);
+
+        unsafe { std::env::set_var(key, "sbayw-bot"); }
+        drop(git);
+
+        assert!(std::env::var(key).is_err());
+
+        // Restore real original
+        unsafe {
+            if let Some(v) = &original {
+                std::env::set_var(key, v);
+            }
+        }
+    }
+
+    #[test]
+    fn drop_removes_git_committer_email_if_was_undefined() {
+        let key = "GIT_COMMITTER_EMAIL";
+        let original = std::env::var(key).ok();
+
+        unsafe { std::env::remove_var(key); }
+        let git = make_git_with_env(vec![(key.to_string(), None)]);
+
+        unsafe { std::env::set_var(key, "bot@example.com"); }
+        drop(git);
+
+        assert!(std::env::var(key).is_err());
+
+        unsafe {
+            if let Some(v) = &original {
+                std::env::set_var(key, v);
+            }
+        }
     }
 }
