@@ -11,6 +11,8 @@ pub struct Git {
     email: String,
     pub owner: String,
     pub repo: String,
+    /// Original env var values to restore on drop
+    original_env: Vec<(String, Option<String>)>,
 }
 
 /// Resolves value from environment variables with cross-fallback.
@@ -30,21 +32,19 @@ impl Git {
         let author = resolve_env("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME", DEFAULT_NAME);
         let email = resolve_env("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL", DEFAULT_EMAIL);
 
-        // Set any missing identity env vars so git picks them up.
+        // Save original env var values and set any missing identity vars so git picks them up.
         // This ensures git commit works in environments without a global git config (e.g. CI runners).
+        // Original values are restored when Git is dropped.
+        let env_keys = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+        let env_values = [&author, &email, &author, &email];
+        let mut original_env = Vec::new();
+
         // Safety: called during single-threaded initialization before tokio runtime starts.
         unsafe {
-            if std::env::var("GIT_AUTHOR_NAME").is_err() {
-                std::env::set_var("GIT_AUTHOR_NAME", &author);
-            }
-            if std::env::var("GIT_AUTHOR_EMAIL").is_err() {
-                std::env::set_var("GIT_AUTHOR_EMAIL", &email);
-            }
-            if std::env::var("GIT_COMMITTER_NAME").is_err() {
-                std::env::set_var("GIT_COMMITTER_NAME", &author);
-            }
-            if std::env::var("GIT_COMMITTER_EMAIL").is_err() {
-                std::env::set_var("GIT_COMMITTER_EMAIL", &email);
+            for (key, value) in env_keys.iter().zip(env_values.iter()) {
+                let original = std::env::var(key).ok();
+                original_env.push((key.to_string(), original));
+                std::env::set_var(key, value);
             }
         }
 
@@ -69,6 +69,7 @@ impl Git {
                 email,
                 owner: caps[4].to_string(),
                 repo: caps[5].to_string(),
+                original_env,
             }
         )
     }
@@ -289,6 +290,21 @@ impl Git {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for Git {
+    fn drop(&mut self) {
+        // Restore original env var values
+        // Safety: called during shutdown, single-threaded context.
+        unsafe {
+            for (key, original) in &self.original_env {
+                match original {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
     }
 }
 

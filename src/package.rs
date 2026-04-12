@@ -326,6 +326,10 @@ impl Pkg {
             match file.target.as_str() {
                 "cargo" => {
                     bump_cargo(version, &file.path, &file.build_metadata)?;
+                    // Update Cargo.lock so it's included in the release commit
+                    std::process::Command::new("cargo")
+                        .args(["update", "--workspace"])
+                        .output()?;
                 },
                 "npm" => {
                     bump_npm(version, &file.path, &file.build_metadata)?;
