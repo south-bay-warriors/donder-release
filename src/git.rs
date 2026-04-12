@@ -1,4 +1,4 @@
-use anyhow::{Result, Ok, bail};
+use anyhow::{Context, Result, Ok, bail};
 use semver::Version;
 use std::process::Command;
 use regex::Regex;
@@ -25,6 +25,15 @@ fn resolve_env(primary: &str, fallback: &str, default: &str) -> String {
 
 const DEFAULT_NAME: &str = "sbayw-bot";
 const DEFAULT_EMAIL: &str = "support@southbaywarriors.com";
+
+/// Parses a git remote URL and returns (host, owner, repo).
+fn parse_origin_url(url: &str) -> Result<(String, String, String)> {
+    let re = Regex::new(r"(git@|https://)([\w\.@]+)(/|:)([\w,\-,_\.]+)/([\w,\-,_\.]+?)(?:\.git)?/?$").unwrap();
+    let caps = re.captures(url)
+        .context(format!("failed to parse remote url: {}", url))?;
+
+    Ok((caps[2].to_string(), caps[4].to_string(), caps[5].to_string()))
+}
 
 impl Git {
     pub fn new(token: &str) -> Result<Self> {
@@ -61,18 +70,16 @@ impl Git {
 
         let origin_url = String::from_utf8_lossy(&origin_url.stdout).trim().to_string();
 
-        // get host, owner and repo from git remote url with regex
-        let re = Regex::new(r"(git@|https://)([\w\.@]+)(/|:)([\w,\-,_]+)/([\w,\-,_]+)(.git){0,1}((/){0,1})").unwrap();
-        let caps = re.captures(&origin_url).unwrap();
+        let (host, owner, repo) = parse_origin_url(&origin_url)?;
 
         Ok(
             Self {
-                repo_url: format!("https://{}@{}/{}/{}.git", token, &caps[2], &caps[4], &caps[5]),
+                repo_url: format!("https://{}@{}/{}/{}.git", token, &host, &owner, &repo),
                 token: token.to_string(),
                 author,
                 email,
-                owner: caps[4].to_string(),
-                repo: caps[5].to_string(),
+                owner,
+                repo,
                 original_env,
             }
         )
@@ -417,6 +424,80 @@ mod tests {
         assert!(c.hash.is_empty());
         assert!(c.subject.is_empty());
         assert!(c.body.is_empty());
+    }
+
+    // parse_origin_url tests
+
+    #[test]
+    fn parse_origin_url_https() {
+        let (host, owner, repo) = parse_origin_url("https://github.com/south-bay-warriors/donder-release").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "donder-release");
+    }
+
+    #[test]
+    fn parse_origin_url_https_with_git_suffix() {
+        let (host, owner, repo) = parse_origin_url("https://github.com/south-bay-warriors/donder-release.git").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "donder-release");
+    }
+
+    #[test]
+    fn parse_origin_url_ssh() {
+        let (host, owner, repo) = parse_origin_url("git@github.com:south-bay-warriors/donder-release.git").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "donder-release");
+    }
+
+    #[test]
+    fn parse_origin_url_ssh_without_git_suffix() {
+        let (host, owner, repo) = parse_origin_url("git@github.com:south-bay-warriors/donder-release").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "donder-release");
+    }
+
+    #[test]
+    fn parse_origin_url_ssh_repo_with_dots() {
+        let (host, owner, repo) = parse_origin_url("git@github.com:south-bay-warriors/com.example.git").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "com.example");
+    }
+
+    #[test]
+    fn parse_origin_url_ssh_repo_with_subdomain() {
+        let (host, owner, repo) = parse_origin_url("git@github.com:south-bay-warriors/com.example.subdomain.git").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "com.example.subdomain");
+    }
+
+    #[test]
+    fn parse_origin_url_repo_with_dots() {
+        let (host, owner, repo) = parse_origin_url("https://github.com/south-bay-warriors/com.example").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "com.example");
+    }
+
+    #[test]
+    fn parse_origin_url_repo_with_dots_and_git_suffix() {
+        let (host, owner, repo) = parse_origin_url("https://github.com/south-bay-warriors/com.example.git").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "com.example");
+    }
+
+    #[test]
+    fn parse_origin_url_repo_with_subdomain() {
+        let (host, owner, repo) = parse_origin_url("https://github.com/south-bay-warriors/com.example.subdomain").unwrap();
+        assert_eq!(host, "github.com");
+        assert_eq!(owner, "south-bay-warriors");
+        assert_eq!(repo, "com.example.subdomain");
     }
 
     // resolve_env tests
