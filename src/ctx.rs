@@ -135,7 +135,7 @@ impl Ctx {
     pub fn new(config: String, pre_id: String, preview: bool, selected_packages: Vec<String>) -> Result<Self> {
         let config_path = path::PathBuf::from(config);
         let file = fs::File::open(config_path).expect("could not open file");
-        let input_config: Ctx = serde_yaml::from_reader(file)
+        let input_config: Ctx = serde_yml::from_reader(file)
             .expect("failed to parse file");
         let mut default_types = vec![
             ReleaseType {

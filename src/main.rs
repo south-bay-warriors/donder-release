@@ -24,6 +24,7 @@ mod api;
 mod changelog;
 mod bump_files;
 mod package;
+mod setup;
 
 use ctx::Ctx;
 
@@ -31,9 +32,12 @@ use ctx::Ctx;
 /// - Quickly create releases on Github from the command line or CI using conventional commits.
 #[derive(Parser)]
 struct Cli {
-    /// Initialize configuration file
+    /// Interactive configuration setup wizard
     #[clap(short, long, default_value = "false")]
-    init: bool,
+    setup: bool,
+    /// Write default configuration file without prompts
+    #[arg(long, default_value = "false")]
+    skip_interactive: bool,
     /// Configuration file path
     #[arg(long, short, default_value = "donder-release.yaml")]
     config: String,
@@ -63,12 +67,19 @@ async fn main() -> Result<()> {
     // Load environment variables from the .env file
     dotenv::from_filename("donder-release.env").ok();
 
-    // Output CLI version
-    if args.init {
-        ctx::init_config().unwrap_or_else(|e| {
-            logError!("Initializing config - {}", e.to_string());
-            process::exit(1);
-        });
+    // Setup configuration
+    if args.setup || args.skip_interactive {
+        if args.skip_interactive {
+            ctx::init_config().unwrap_or_else(|e| {
+                logError!("Initializing config - {}", e.to_string());
+                process::exit(1);
+            });
+        } else {
+            setup::interactive_setup().unwrap_or_else(|e| {
+                logError!("Setup - {}", e.to_string());
+                process::exit(1);
+            });
+        }
         return Ok(());
     }
 
