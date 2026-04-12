@@ -3,6 +3,13 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: Major version
+        required: true
+        type: choice
+        options:
+          - v1 (master)
+          - v2 (main)
       type:
         description: Release type
         required: true
@@ -15,8 +22,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve branch
+        id: branch
+        run: |
+          if [ "${{ inputs.version }}" = "v2 (main)" ]; then
+            echo "ref=main" >> $GITHUB_OUTPUT
+          else
+            echo "ref=master" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v6
         with:
+          ref: ${{ steps.branch.outputs.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -61,10 +78,18 @@ jobs:
       - name: Publish to npm
         if: steps.donder.outputs.released == 'true'
         run: |
-          if [ "${{ inputs.type }}" = "beta" ]; then
-            npm publish --tag beta
+          if [ "${{ inputs.version }}" = "v2 (main)" ]; then
+            if [ "${{ inputs.type }}" = "beta" ]; then
+              npm publish --tag next
+            else
+              npm publish --tag latest
+            fi
           else
-            npm publish
+            if [ "${{ inputs.type }}" = "beta" ]; then
+              npm publish --tag beta
+            else
+              npm publish
+            fi
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
