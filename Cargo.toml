@@ -1,6 +1,6 @@
 [package]
 name = "donder-release"
-version = "1.5.5"
+version = "2.0.0-beta.0"
 authors = ["Bruno Morgado <bruno@southbaywarriors.com>"]
 description = "Quickly create releases on Github from the command line or CI using conventional commits."
 license = "MIT"
