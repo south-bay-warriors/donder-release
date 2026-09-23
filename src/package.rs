@@ -7,7 +7,7 @@ use std::{
 };
 use anyhow::{Context, Result, bail, Ok};
 use serde::Deserialize;
-use chrono::{Local, Utc, Datelike};
+use chrono::{Local, Utc, Datelike, NaiveDate};
 use semver::{Version, Prerelease, BuildMetadata};
 
 use crate::{
@@ -479,18 +479,30 @@ impl Pkg {
 
 /// Generates a CalVer version string from a format and MICRO value
 fn calver_version(format: &str, micro: u64) -> String {
-    let now = Utc::now();
+    calver_version_at(format, micro, Utc::now().date_naive())
+}
+
+/// Generates a CalVer version string for a given date
+fn calver_version_at(format: &str, micro: u64, date: NaiveDate) -> String {
     let segments: Vec<&str> = format.split('.').collect();
+
+    // ISO weeks near New Year belong to the neighbouring year (2025-12-29 is week 1 of 2026),
+    // so weekly formats take the ISO week-year to keep year and week from the same calendar
+    let iso_week = date.iso_week();
+    let year = match segments.iter().any(|seg| *seg == "WW" || *seg == "0W") {
+        true => iso_week.year(),
+        false => date.year(),
+    };
 
     segments.iter().map(|seg| {
         match *seg {
-            "YYYY" => now.year().to_string(),
-            "YY" => (now.year() % 100).to_string(),
-            "0Y" => format!("{:02}", now.year() % 100),
-            "MM" => now.month().to_string(),
-            "0M" => format!("{:02}", now.month()),
-            "WW" => now.iso_week().week().to_string(),
-            "0W" => format!("{:02}", now.iso_week().week()),
+            "YYYY" => year.to_string(),
+            "YY" => (year % 100).to_string(),
+            "0Y" => format!("{:02}", year % 100),
+            "MM" => date.month().to_string(),
+            "0M" => format!("{:02}", date.month()),
+            "WW" => iso_week.week().to_string(),
+            "0W" => format!("{:02}", iso_week.week()),
             "MICRO" => micro.to_string(),
             _ => seg.to_string(),
         }
@@ -778,6 +790,56 @@ mod tests {
         let now = chrono::Utc::now();
         let v = calver_version("YY.MM.MICRO", 5);
         assert_eq!(v, format!("{}.{}.5", now.year() % 100, now.month()));
+    }
+
+    fn date(value: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn calver_week_uses_iso_week_year_at_end_of_december() {
+        // 2025-12-29 is in ISO week 1 of 2026
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2025-12-28")), "2025.52.0");
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2025-12-29")), "2026.1.0");
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2025-12-31")), "2026.1.0");
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2026-01-01")), "2026.1.0");
+    }
+
+    #[test]
+    fn calver_week_uses_iso_week_year_at_start_of_january() {
+        // 2027-01-01 is in ISO week 53 of 2026
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2026-12-31")), "2026.53.0");
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2027-01-01")), "2026.53.0");
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2027-01-03")), "2026.53.0");
+        assert_eq!(calver_version_at("YYYY.WW.MICRO", 0, date("2027-01-04")), "2027.1.0");
+    }
+
+    #[test]
+    fn calver_week_year_applies_to_every_year_segment() {
+        assert_eq!(calver_version_at("YYYY.0W.MICRO", 4, date("2025-12-29")), "2026.01.4");
+        assert_eq!(calver_version_at("YY.WW.MICRO", 4, date("2025-12-29")), "26.1.4");
+        assert_eq!(calver_version_at("0Y.0W.MICRO", 4, date("2027-01-01")), "26.53.4");
+    }
+
+    #[test]
+    fn calver_week_versions_increase_across_new_year() {
+        let days = ["2025-12-22", "2025-12-28", "2025-12-29", "2026-01-04", "2026-01-05",
+            "2026-12-27", "2026-12-28", "2027-01-01", "2027-01-03", "2027-01-04"];
+        let versions = days
+            .iter()
+            .map(|day| crate::git::parse_version(&calver_version_at("YYYY.WW.MICRO", 0, date(day))).unwrap())
+            .collect::<Vec<semver::Version>>();
+
+        for pair in versions.windows(2) {
+            assert!(pair[0] <= pair[1], "{} should not sort after {}", pair[0], pair[1]);
+        }
+    }
+
+    #[test]
+    fn calver_month_keeps_calendar_year_at_end_of_december() {
+        assert_eq!(calver_version_at("YYYY.MM.MICRO", 0, date("2025-12-29")), "2025.12.0");
+        assert_eq!(calver_version_at("YY.0M.MICRO", 0, date("2025-12-31")), "25.12.0");
+        assert_eq!(calver_version_at("YYYY.MM.MICRO", 0, date("2027-01-01")), "2027.1.0");
     }
 
     #[test]
