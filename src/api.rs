@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use serde::{Serialize, Deserialize};
-use semver::Version;
+use crate::git::parse_version;
 
 #[derive(Default, Debug)]
 pub struct GithubApi {
@@ -37,7 +37,7 @@ impl GithubApi {
             tag_name: release_tag.to_string(),
             name: release_tag.to_string(),
             body: release_notes.to_string(),
-            prerelease: !Version::parse(&version).unwrap().pre.is_empty(),
+            prerelease: parse_version(&version).is_some_and(|v| !v.pre.is_empty()),
         };
 
         let client = reqwest::Client::new();
@@ -82,7 +82,9 @@ impl GithubApi {
 
         for release in pre_releases {
             let tag = release.tag_name.replace(tag_prefix, "");
-            let version = Version::parse(&tag).unwrap();
+            let Some(version) = parse_version(&tag) else {
+                continue;
+            };
             if !version.pre.is_empty() {
                 let response = client
                     .delete(format!("{}/releases/{}", &self.api_url, release.id))

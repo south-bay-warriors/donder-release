@@ -407,6 +407,17 @@ impl Pkg {
         Ok(())
     }
 
+    /// Fails if the next release tag already exists, before any file is bumped or committed
+    pub fn ensure_tag_available(&self, git: &Git) -> Result<()> {
+        let tag = &self.changelog.next_release_version;
+
+        if git.tag_exists(tag)? {
+            bail!("tag {} already exists", tag);
+        }
+
+        Ok(())
+    }
+
     pub async fn publish_release(&self, git: &Git, api: &GithubApi, release_message: &str) -> Result<()> {
         logInfo!("Publishing release");
 
@@ -414,12 +425,14 @@ impl Pkg {
         git
             .commit(release_message.replace("%s", &self.changelog.next_release_version).as_str())?;
 
-        // Push to remote
-        git.push()?;
+        // Release tag, dropping the release commit if the tag can't be created
+        if let Err(e) = git.tag(&self.changelog.next_release_version) {
+            git.undo_commit()?;
+            return Err(e);
+        }
 
-        // Release tag
-        git.tag(&self.changelog.next_release_version)?;
-        git.push_tag(&self.changelog.next_release_version)?;
+        // Push commit and tag to remote atomically
+        git.push_release(&self.changelog.next_release_version)?;
 
         // Create release on GitHub
         api.publish_release(
