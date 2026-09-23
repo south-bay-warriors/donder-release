@@ -167,7 +167,8 @@ async fn main() -> Result<()> {
                     pkg.publish_release(&ctx.git, &ctx.api, &ctx.release_message)
                         .await
                         .unwrap_or_else(|e| {
-                            logError!("Publishing release - {}", e.to_string());
+                            // {:#} keeps the underlying cause after the context
+                            logError!("Publishing release - {:#}", e);
                             process::exit(1);
                         });
 

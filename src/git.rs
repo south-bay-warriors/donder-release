@@ -2,6 +2,7 @@ use anyhow::{Context, Result, Ok, bail};
 use semver::{Version, Prerelease};
 use std::process::Command;
 use regex::Regex;
+use chrono::Local;
 
 #[derive(Debug, Default)]
 pub struct Git {
@@ -246,14 +247,60 @@ impl Git {
             .args(["push", "--atomic", &self.repo_url.as_str(), "HEAD", tag])
             .output()?;
 
-        // check if push was successful
-        if !output.status.success() {
-            self.undo_tag(tag)?;
-            self.undo_commit()?;
-            bail!("failed to push release, token may be invalid: {}", String::from_utf8_lossy(&output.stderr));
+        if output.status.success() {
+            return Ok(());
         }
 
-        Ok(())
+        let push_error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        // A failed push doesn't prove the remote rejected it (the connection can drop after the
+        // server applied the update), so check the remote before rolling anything back
+        let remote_tag = match self.remote_tag_object(tag) {
+            Result::Ok(remote_tag) => remote_tag,
+            Err(e) => bail!(
+                "failed to push release and could not check whether the remote has tag {} ({}), kept the local release commit and tag: {}",
+                tag, e, push_error,
+            ),
+        };
+
+        if remote_tag.is_some() && remote_tag == self.local_tag_object(tag).ok() {
+            logInfo!("Push reported an error but the remote already has tag {}, continuing", tag);
+            return Ok(());
+        }
+
+        // Undo both even if one fails
+        let undo_tag = self.undo_tag(tag);
+        let undo_commit = self.undo_commit();
+        undo_tag.and(undo_commit)
+            .with_context(|| format!("failed to push release ({}) and to roll back the local release commit and tag", push_error))?;
+
+        bail!("failed to push release, token may be invalid: {}", push_error);
+    }
+
+    /// Object id of the tag on the remote, or None if the remote doesn't have it
+    fn remote_tag_object(&self, tag: &str) -> Result<Option<String>> {
+        let ref_name = format!("refs/tags/{}", tag);
+        let output = Command::new("git")
+            .args(["ls-remote", "--tags", &self.repo_url.as_str(), &ref_name])
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to list remote tags");
+        }
+
+        Ok(parse_ls_remote_ref(&String::from_utf8_lossy(&output.stdout), &ref_name))
+    }
+
+    fn local_tag_object(&self, tag: &str) -> Result<String> {
+        let output = Command::new("git")
+            .args(["rev-parse", "--verify", &format!("refs/tags/{}", tag)])
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to resolve local tag");
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     pub fn tag_exists(&self, tag: &str) -> Result<bool> {
@@ -351,6 +398,14 @@ pub fn parse_version(version_str: &str) -> Option<Version> {
     Some(version)
 }
 
+/// Finds the object id for `ref_name` in `git ls-remote` output (`<id>\t<ref>` per line)
+fn parse_ls_remote_ref(output: &str, ref_name: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (id, name) = line.split_once('\t')?;
+        (name == ref_name).then(|| id.to_string())
+    })
+}
+
 /// Sorts releases newest first, comparing versions numerically so v1.2.10 > v1.2.9
 fn sort_releases_desc(releases: &mut [ReleaseInfo]) {
     releases.sort_by(|a, b| b.version.cmp(&a.version));
@@ -436,6 +491,26 @@ mod tests {
     fn release_info_new_parses_zero_padded_calver_prerelease() {
         let info = ReleaseInfo::new("v26.09.0-beta.2", "v", false);
         assert_eq!(info.version, Version::parse("26.9.0-beta.2").unwrap());
+    }
+
+    // parse_ls_remote_ref tests
+
+    #[test]
+    fn parse_ls_remote_ref_finds_exact_ref() {
+        let output = "8c2df03\trefs/tags/v1.0.2\n7ab897f\trefs/tags/v1.0.2^{}\n";
+        assert_eq!(parse_ls_remote_ref(output, "refs/tags/v1.0.2"), Some("8c2df03".to_string()));
+    }
+
+    #[test]
+    fn parse_ls_remote_ref_ignores_refs_sharing_a_suffix() {
+        // ls-remote patterns match on the ref's tail, so a package tag can come back too
+        let output = "aaaaaaa\trefs/tags/pkg@v1.0.2\n";
+        assert_eq!(parse_ls_remote_ref(output, "refs/tags/v1.0.2"), None);
+    }
+
+    #[test]
+    fn parse_ls_remote_ref_empty_output() {
+        assert_eq!(parse_ls_remote_ref("", "refs/tags/v1.0.2"), None);
     }
 
     // parse_version tests
