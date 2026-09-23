@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, Ok, bail};
-use semver::Version;
+use semver::{Version, Prerelease};
 use std::process::Command;
 use regex::Regex;
+use chrono::Local;
 
 #[derive(Debug, Default)]
 pub struct Git {
@@ -135,10 +136,8 @@ impl Git {
             if !tag.starts_with(prefix) {
                 return false;
             }
-            let version_str = tag.replace(prefix, "");
             // Accept semver or CalVer (digits, dots, and optional pre-release)
-            Version::parse(&version_str).is_ok()
-                || version_str.split('.').count() == 3
+            parse_version(&tag.replace(prefix, "")).is_some()
         });
 
         // map tags to tag info
@@ -147,8 +146,7 @@ impl Git {
             .map(|tag| ReleaseInfo::new(tag, prefix, false))
             .collect::<Vec<ReleaseInfo>>();
 
-        // sort tags by version string descending (works for both semver and CalVer)
-        tags_info.sort_by(|a, b| b.version_str.cmp(&a.version_str));
+        sort_releases_desc(&mut tags_info);
 
         Ok(tags_info)
     }
@@ -243,34 +241,74 @@ impl Git {
         Ok(())
     }
 
-    // push commit
-    pub fn push(&self) -> Result<()> {
+    // push release commit and tag together so the remote gets both or neither
+    pub fn push_release(&self, tag: &str) -> Result<()> {
         let output = Command::new("git")
-            .args(["push", &format!("--repo={}", &self.repo_url.as_str())])
+            .args(["push", "--atomic", &self.repo_url.as_str(), "HEAD", tag])
             .output()?;
 
-        // check if push was successful
-        if !output.status.success() {
-            self.undo_commit()?;
-            bail!("failed to push changes token may be invalid: {}", String::from_utf8_lossy(&output.stderr));
+        if output.status.success() {
+            return Ok(());
         }
 
-        Ok(())
+        let push_error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        // A failed push doesn't prove the remote rejected it (the connection can drop after the
+        // server applied the update), so check the remote before rolling anything back
+        let remote_tag = match self.remote_tag_object(tag) {
+            Result::Ok(remote_tag) => remote_tag,
+            Err(e) => bail!(
+                "failed to push release and could not check whether the remote has tag {} ({}), kept the local release commit and tag: {}",
+                tag, e, push_error,
+            ),
+        };
+
+        if remote_tag.is_some() && remote_tag == self.local_tag_object(tag).ok() {
+            logInfo!("Push reported an error but the remote already has tag {}, continuing", tag);
+            return Ok(());
+        }
+
+        // Undo both even if one fails
+        let undo_tag = self.undo_tag(tag);
+        let undo_commit = self.undo_commit();
+        undo_tag.and(undo_commit)
+            .with_context(|| format!("failed to push release ({}) and to roll back the local release commit and tag", push_error))?;
+
+        bail!("failed to push release, token may be invalid: {}", push_error);
     }
 
-    // push tag
-    pub fn push_tag(&self, tag: &str) -> Result<()> {
+    /// Object id of the tag on the remote, or None if the remote doesn't have it
+    fn remote_tag_object(&self, tag: &str) -> Result<Option<String>> {
+        let ref_name = format!("refs/tags/{}", tag);
         let output = Command::new("git")
-            .args(["push", &self.repo_url.as_str(), tag])
+            .args(["ls-remote", "--tags", &self.repo_url.as_str(), &ref_name])
             .output()?;
 
-        // check if push was successful
         if !output.status.success() {
-            self.undo_tag(tag)?;
-            bail!(format!("failed to push tag: {}", String::from_utf8_lossy(&output.stderr)));
+            bail!("failed to list remote tags");
         }
 
-        Ok(())
+        Ok(parse_ls_remote_ref(&String::from_utf8_lossy(&output.stdout), &ref_name))
+    }
+
+    fn local_tag_object(&self, tag: &str) -> Result<String> {
+        let output = Command::new("git")
+            .args(["rev-parse", "--verify", &format!("refs/tags/{}", tag)])
+            .output()?;
+
+        if !output.status.success() {
+            bail!("failed to resolve local tag");
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    pub fn tag_exists(&self, tag: &str) -> Result<bool> {
+        let output = Command::new("git")
+            .args(["rev-parse", "--quiet", "--verify", &format!("refs/tags/{}", tag)])
+            .output()?;
+
+        Ok(output.status.success())
     }
 
     // delete tag on remote
@@ -329,6 +367,50 @@ impl Drop for Git {
     }
 }
 
+/// Parses a semver or CalVer version string into a comparable `Version`.
+/// CalVer segments may be zero-padded (e.g. `2026.09.3`), which strict semver rejects,
+/// so the core segments are parsed as integers and the pre-release is kept as-is.
+pub fn parse_version(version_str: &str) -> Option<Version> {
+    if let std::result::Result::Ok(version) = Version::parse(version_str) {
+        return Some(version);
+    }
+
+    let version_str = version_str.split('+').next().unwrap_or_default();
+    let (core, pre) = match version_str.split_once('-') {
+        Some((core, pre)) => (core, pre),
+        None => (version_str, ""),
+    };
+
+    let parts = core
+        .split('.')
+        .map(|part| part.parse::<u64>().ok())
+        .collect::<Option<Vec<u64>>>()?;
+
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let mut version = Version::new(parts[0], parts[1], parts[2]);
+    if !pre.is_empty() {
+        version.pre = Prerelease::new(pre).ok()?;
+    }
+
+    Some(version)
+}
+
+/// Finds the object id for `ref_name` in `git ls-remote` output (`<id>\t<ref>` per line)
+fn parse_ls_remote_ref(output: &str, ref_name: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (id, name) = line.split_once('\t')?;
+        (name == ref_name).then(|| id.to_string())
+    })
+}
+
+/// Sorts releases newest first, comparing versions numerically so v1.2.10 > v1.2.9
+fn sort_releases_desc(releases: &mut [ReleaseInfo]) {
+    releases.sort_by(|a, b| b.version.cmp(&a.version));
+}
+
 #[derive(Debug)]
 pub struct ReleaseInfo {
     pub version: Version,
@@ -341,8 +423,7 @@ pub struct ReleaseInfo {
 impl ReleaseInfo {
     pub fn new(tag: &str, prefix: &str, initial: bool) -> Self {
         let version_str = tag.replace(prefix, "");
-        // Try semver parse, fallback to 0.0.0 for CalVer tags with zero-padded segments
-        let version = Version::parse(&version_str).unwrap_or(Version::new(0, 0, 0));
+        let version = parse_version(&version_str).unwrap_or(Version::new(0, 0, 0));
         Self {
             version,
             version_str,
@@ -397,6 +478,212 @@ mod tests {
     fn release_info_new_with_prerelease() {
         let info = ReleaseInfo::new("v2.0.0-alpha.1", "v", false);
         assert_eq!(info.version, Version::parse("2.0.0-alpha.1").unwrap());
+    }
+
+    #[test]
+    fn release_info_new_parses_zero_padded_calver() {
+        let info = ReleaseInfo::new("v2026.09.3", "v", false);
+        assert_eq!(info.version, Version::new(2026, 9, 3));
+        assert_eq!(info.tag(), "v2026.09.3");
+    }
+
+    #[test]
+    fn release_info_new_parses_zero_padded_calver_prerelease() {
+        let info = ReleaseInfo::new("v26.09.0-beta.2", "v", false);
+        assert_eq!(info.version, Version::parse("26.9.0-beta.2").unwrap());
+    }
+
+    // parse_ls_remote_ref tests
+
+    #[test]
+    fn parse_ls_remote_ref_finds_exact_ref() {
+        let output = "8c2df03\trefs/tags/v1.0.2\n7ab897f\trefs/tags/v1.0.2^{}\n";
+        assert_eq!(parse_ls_remote_ref(output, "refs/tags/v1.0.2"), Some("8c2df03".to_string()));
+    }
+
+    #[test]
+    fn parse_ls_remote_ref_ignores_refs_sharing_a_suffix() {
+        // ls-remote patterns match on the ref's tail, so a package tag can come back too
+        let output = "aaaaaaa\trefs/tags/pkg@v1.0.2\n";
+        assert_eq!(parse_ls_remote_ref(output, "refs/tags/v1.0.2"), None);
+    }
+
+    #[test]
+    fn parse_ls_remote_ref_empty_output() {
+        assert_eq!(parse_ls_remote_ref("", "refs/tags/v1.0.2"), None);
+    }
+
+    // parse_version tests
+
+    #[test]
+    fn parse_version_rejects_non_numeric_segments() {
+        assert!(parse_version("1.2.x").is_none());
+    }
+
+    #[test]
+    fn parse_version_rejects_wrong_segment_count() {
+        assert!(parse_version("2026.09").is_none());
+        assert!(parse_version("1.2.3.4").is_none());
+    }
+
+    // sort_releases_desc tests
+
+    fn sorted_tags(tags: &[&str]) -> Vec<String> {
+        let mut releases = tags
+            .iter()
+            .map(|tag| ReleaseInfo::new(tag, "v", false))
+            .collect::<Vec<ReleaseInfo>>();
+        sort_releases_desc(&mut releases);
+        releases.iter().map(|r| r.tag()).collect()
+    }
+
+    #[test]
+    fn sort_releases_two_digit_patch_is_newest() {
+        assert_eq!(
+            sorted_tags(&["v1.2.8", "v1.2.10", "v1.2.9"]),
+            vec!["v1.2.10", "v1.2.9", "v1.2.8"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_two_digit_minor_and_major() {
+        assert_eq!(
+            sorted_tags(&["v9.0.0", "v10.0.0", "v1.9.0", "v1.10.0"]),
+            vec!["v10.0.0", "v9.0.0", "v1.10.0", "v1.9.0"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_prerelease_below_release() {
+        assert_eq!(
+            sorted_tags(&["v1.2.10-beta.10", "v1.2.10", "v1.2.10-beta.9"]),
+            vec!["v1.2.10", "v1.2.10-beta.10", "v1.2.10-beta.9"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_calver_two_digit_micro_and_month() {
+        assert_eq!(
+            sorted_tags(&["v2026.09.9", "v2026.10.0", "v2026.09.10"]),
+            vec!["v2026.10.0", "v2026.09.10", "v2026.09.9"],
+        );
+        assert_eq!(
+            sorted_tags(&["v2026.9.3", "v2026.10.0"]),
+            vec!["v2026.10.0", "v2026.9.3"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_patch_digit_count_boundaries() {
+        assert_eq!(
+            sorted_tags(&["v1.2.99", "v1.2.1000", "v1.2.9", "v1.2.100", "v1.2.999", "v1.2.10"]),
+            vec!["v1.2.1000", "v1.2.999", "v1.2.100", "v1.2.99", "v1.2.10", "v1.2.9"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_minor_digit_count_boundaries() {
+        assert_eq!(
+            sorted_tags(&["v1.99.0", "v1.1000.0", "v1.9.0", "v1.100.0", "v1.999.0", "v1.10.0"]),
+            vec!["v1.1000.0", "v1.999.0", "v1.100.0", "v1.99.0", "v1.10.0", "v1.9.0"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_major_digit_count_boundaries() {
+        assert_eq!(
+            sorted_tags(&["v99.0.0", "v1000.0.0", "v9.0.0", "v100.0.0", "v999.0.0", "v10.0.0"]),
+            vec!["v1000.0.0", "v999.0.0", "v100.0.0", "v99.0.0", "v10.0.0", "v9.0.0"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_higher_segment_wins_over_more_digits_below() {
+        // A larger lower segment must never outrank a larger higher segment
+        assert_eq!(
+            sorted_tags(&["v1.2.12345", "v1.3.0", "v1.99999.99999", "v2.0.0", "v10.0.0", "v9.99999.99999"]),
+            vec!["v10.0.0", "v9.99999.99999", "v2.0.0", "v1.99999.99999", "v1.3.0", "v1.2.12345"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_mixed_digit_counts_in_every_segment() {
+        assert_eq!(
+            sorted_tags(&["v12.345.6789", "v9.99999.0", "v12.345.678", "v12.99.99999", "v12.34.56789", "v123.4.5", "v12.3456.7", "v1.23456.789"]),
+            vec!["v123.4.5", "v12.3456.7", "v12.345.6789", "v12.345.678", "v12.99.99999", "v12.34.56789", "v9.99999.0", "v1.23456.789"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_is_independent_of_input_order() {
+        let expected = vec!["v100.0.0", "v10.10.10", "v10.10.9", "v10.9.10", "v9.10.10", "v1.0.0"];
+        let mut tags = expected.clone();
+
+        tags.reverse();
+        assert_eq!(sorted_tags(&tags), expected);
+
+        tags.rotate_left(2);
+        assert_eq!(sorted_tags(&tags), expected);
+    }
+
+    #[test]
+    fn sort_releases_large_numbers_up_to_u64_max() {
+        assert_eq!(
+            sorted_tags(&["v1.0.18446744073709551614", "v1.0.18446744073709551615", "v1.0.4294967296", "v1.0.4294967295"]),
+            vec!["v1.0.18446744073709551615", "v1.0.18446744073709551614", "v1.0.4294967296", "v1.0.4294967295"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_multi_digit_prerelease_numbers() {
+        assert_eq!(
+            sorted_tags(&["v10.20.30-beta.9", "v10.20.30-beta.100", "v10.20.30-beta.10", "v10.20.30", "v10.20.29"]),
+            vec!["v10.20.30", "v10.20.30-beta.100", "v10.20.30-beta.10", "v10.20.30-beta.9", "v10.20.29"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_calver_multi_digit_micro() {
+        assert_eq!(
+            sorted_tags(&["v2026.09.99", "v2026.09.1000", "v2026.09.9", "v2026.09.100", "v2026.10.0"]),
+            vec!["v2026.10.0", "v2026.09.1000", "v2026.09.100", "v2026.09.99", "v2026.09.9"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_calver_short_and_long_years() {
+        assert_eq!(
+            sorted_tags(&["v99.12.5", "v100.01.0", "v26.09.10", "v26.09.9"]),
+            vec!["v100.01.0", "v99.12.5", "v26.09.10", "v26.09.9"],
+        );
+    }
+
+    #[test]
+    fn sort_releases_with_package_prefix() {
+        let mut releases = ["my-pkg@v1.2.9", "my-pkg@v1.2.100", "my-pkg@v1.2.10"]
+            .iter()
+            .map(|tag| ReleaseInfo::new(tag, "my-pkg@v", false))
+            .collect::<Vec<ReleaseInfo>>();
+        sort_releases_desc(&mut releases);
+
+        assert_eq!(
+            releases.iter().map(|r| r.tag()).collect::<Vec<String>>(),
+            vec!["my-pkg@v1.2.100", "my-pkg@v1.2.10", "my-pkg@v1.2.9"],
+        );
+    }
+
+    #[test]
+    fn parse_version_multi_digit_segments() {
+        assert_eq!(parse_version("123.4567.89012"), Some(Version::new(123, 4567, 89012)));
+        assert_eq!(parse_version("2026.09.1000"), Some(Version::new(2026, 9, 1000)));
+        assert_eq!(parse_version("1.0.18446744073709551615"), Some(Version::new(1, 0, u64::MAX)));
+    }
+
+    #[test]
+    fn parse_version_rejects_segment_overflowing_u64() {
+        // Zero-padded so it takes the CalVer path too; neither parser can hold it
+        assert!(parse_version("1.0.18446744073709551616").is_none());
+        assert!(parse_version("01.0.18446744073709551616").is_none());
     }
 
     #[test]

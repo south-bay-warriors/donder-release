@@ -277,11 +277,12 @@ impl Pkg {
         let format_segments: Vec<&str> = format.split('.').collect();
         let micro_idx = format_segments.iter().position(|s| *s == "MICRO").unwrap();
 
-        // Compare non-MICRO segments
+        // Compare non-MICRO segments numerically, so a tag padded differently
+        // from the format (2026.9 vs 2026.09) is still the same period
         let same_prefix = current_parts.iter().enumerate()
             .filter(|(i, _)| *i != micro_idx)
             .zip(last_parts.iter().enumerate().filter(|(i, _)| *i != micro_idx))
-            .all(|((_, a), (_, b))| a == b);
+            .all(|((_, a), (_, b))| matches!((a.parse::<u64>(), b.parse::<u64>()), (Result::Ok(a), Result::Ok(b)) if a == b));
 
         if same_prefix && last_parts.len() == 3 {
             // Same calendar period: increment MICRO
@@ -407,6 +408,17 @@ impl Pkg {
         Ok(())
     }
 
+    /// Fails if the next release tag already exists, before any file is bumped or committed
+    pub fn ensure_tag_available(&self, git: &Git) -> Result<()> {
+        let tag = &self.changelog.next_release_version;
+
+        if git.tag_exists(tag)? {
+            bail!("tag {} already exists", tag);
+        }
+
+        Ok(())
+    }
+
     pub async fn publish_release(&self, git: &Git, api: &GithubApi, release_message: &str) -> Result<()> {
         logInfo!("Publishing release");
 
@@ -414,19 +426,31 @@ impl Pkg {
         git
             .commit(release_message.replace("%s", &self.changelog.next_release_version).as_str())?;
 
-        // Push to remote
-        git.push()?;
+        // Release tag, dropping the release commit if the tag can't be created
+        if let Err(e) = git.tag(&self.changelog.next_release_version) {
+            git.undo_commit()?;
+            return Err(e);
+        }
 
-        // Release tag
-        git.tag(&self.changelog.next_release_version)?;
-        git.push_tag(&self.changelog.next_release_version)?;
+        // Push commit and tag to remote atomically
+        git.push_release(&self.changelog.next_release_version)?;
 
-        // Create release on GitHub
-        api.publish_release(
+        // Create release on GitHub. The commit and tag are already pushed, so a later run
+        // won't recreate this release, print the notes so it can be created by hand
+        if let Err(e) = api.publish_release(
             &self.changelog.next_release_version,
             &self.tag_prefix,
             &self.changelog.notes)
-            .await?;
+            .await
+        {
+            logError!("Release notes for {}:", self.changelog.next_release_version);
+            println!("{}", self.changelog.notes);
+
+            return Err(e.context(format!(
+                "tag {} and its release commit are pushed, but the GitHub release could not be created, create it manually with the notes above",
+                self.changelog.next_release_version,
+            )));
+        }
         Ok(())
     }
 
@@ -797,6 +821,42 @@ mod tests {
         let result = pkg.load_changelog("", &test_types()).unwrap();
         assert!(result);
         assert_eq!(pkg.changelog.next_release_version, "v1.1.0");
+    }
+
+    #[test]
+    fn calver_increments_micro_when_last_tag_is_unpadded() {
+        let now = chrono::Utc::now();
+        let last_tag = format!("v{}.{}.9", now.year(), now.month());
+        let mut pkg = make_calver_pkg(&last_tag, "v", false, "YYYY.0M.MICRO");
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: a fix", "")];
+
+        assert!(pkg.load_changelog("", &test_types()).unwrap());
+        assert_eq!(pkg.changelog.next_release_version, format!("v{}.{:02}.10", now.year(), now.month()));
+    }
+
+    #[test]
+    fn calver_increments_micro_when_last_tag_is_padded() {
+        let now = chrono::Utc::now();
+        let last_tag = format!("v{}.{:02}.9", now.year(), now.month());
+        let mut pkg = make_calver_pkg(&last_tag, "v", false, "YYYY.MM.MICRO");
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: a fix", "")];
+
+        assert!(pkg.load_changelog("", &test_types()).unwrap());
+        assert_eq!(pkg.changelog.next_release_version, format!("v{}.{}.10", now.year(), now.month()));
+    }
+
+    #[test]
+    fn calver_increments_multi_digit_micro() {
+        let now = chrono::Utc::now();
+        let last_tag = format!("v{}.{:02}.999", now.year(), now.month());
+        let mut pkg = make_calver_pkg(&last_tag, "v", false, "YYYY.0M.MICRO");
+        pkg.last_release.update_head("somehead");
+        pkg.commits = vec![commit("fix: a fix", "")];
+
+        assert!(pkg.load_changelog("", &test_types()).unwrap());
+        assert_eq!(pkg.changelog.next_release_version, format!("v{}.{:02}.1000", now.year(), now.month()));
     }
 
     #[test]

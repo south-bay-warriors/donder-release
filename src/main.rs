@@ -128,6 +128,15 @@ async fn main() -> Result<()> {
             });
 
         if has_changelog {
+            // Refuse to publish over an existing tag, before anything is written
+            if !ctx.preview {
+                pkg.ensure_tag_available(&ctx.git)
+                    .unwrap_or_else(|e| {
+                        logError!("Publishing release - {}", e.to_string());
+                        process::exit(1);
+                    });
+            }
+
             // Write release notes
             pkg.write_notes(&ctx.preview, &ctx.git, &ctx.types, &ctx.changelog_file)
                 .unwrap_or_else(|e| {
@@ -158,7 +167,8 @@ async fn main() -> Result<()> {
                     pkg.publish_release(&ctx.git, &ctx.api, &ctx.release_message)
                         .await
                         .unwrap_or_else(|e| {
-                            logError!("Publishing release - {}", e.to_string());
+                            // {:#} keeps the underlying cause after the context
+                            logError!("Publishing release - {:#}", e);
                             process::exit(1);
                         });
 
