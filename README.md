@@ -194,7 +194,7 @@ bump_files:
   - { target: npm, path: packages/app, package: true, versioning: calver, calver_format: YYYY.MM.MICRO }
 ```
 
-Packages without a versioning override inherit the global setting.
+Packages without a versioning override inherit the global setting. A per-package `calver_format` follows the same rules as the global one (see [CalVer](#calendar-versioning-calver)), and falls back to the global `calver_format` when omitted.
 
 ## Calendar versioning (CalVer)
 
@@ -218,7 +218,7 @@ Supported format segments:
 | `0W` | Zero-padded week | 01-52 |
 | `MICRO` | Auto-incrementing counter | 0, 1, 2... |
 
-The format must have exactly 3 dot-separated segments, one of which must be `MICRO`. MICRO resets to 0 when the calendar segment changes (e.g. new month).
+The format must have exactly 3 dot-separated segments, ordered year, period (month or week), then `MICRO`, e.g. `YYYY.MM.MICRO` or `YY.0W.MICRO`. Releases are sorted by comparing segments left to right, so this order keeps them chronological. MICRO resets to 0 when the calendar segment changes (e.g. new month).
 
 Pre-releases are not supported with CalVer. Breaking changes are tracked in the changelog but do not affect the version number.
 
