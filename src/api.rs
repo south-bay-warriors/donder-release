@@ -100,9 +100,19 @@ impl GithubApi {
         Ok(())
     }
 
+    /// URL of the release for a tag, with the tag encoded as a single path segment
+    /// since tag names can contain reserved characters such as `/` and `#`
+    fn release_by_tag_url(&self, release_tag: &str) -> Result<reqwest::Url> {
+        let mut url = reqwest::Url::parse(&self.api_url)?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("invalid api url: {}", self.api_url))?
+            .extend(["releases", "tags", release_tag]);
+        Ok(url)
+    }
+
     async fn release_exists(&self, client: &reqwest::Client, release_tag: &str) -> Result<bool> {
         let response = client
-            .get(format!("{}/releases/tags/{}", &self.api_url, release_tag))
+            .get(self.release_by_tag_url(release_tag)?)
             .header(CONTENT_TYPE, &self.content_type)
             .header(USER_AGENT, &self.user_agent)
             .header(AUTHORIZATION, &self.authorization)
@@ -169,4 +179,36 @@ struct PostRelease {
     name: String,
     body: String,
     prerelease: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_by_tag_url_plain_tag() {
+        let api = GithubApi::new("token", "owner", "repo");
+        assert_eq!(
+            api.release_by_tag_url("v1.2.10").unwrap().as_str(),
+            "https://api.github.com/repos/owner/repo/releases/tags/v1.2.10",
+        );
+    }
+
+    #[test]
+    fn release_by_tag_url_package_tag() {
+        let api = GithubApi::new("token", "owner", "repo");
+        assert_eq!(
+            api.release_by_tag_url("my-pkg@v1.0.0").unwrap().as_str(),
+            "https://api.github.com/repos/owner/repo/releases/tags/my-pkg@v1.0.0",
+        );
+    }
+
+    #[test]
+    fn release_by_tag_url_encodes_reserved_characters() {
+        let api = GithubApi::new("token", "owner", "repo");
+        assert_eq!(
+            api.release_by_tag_url("release/v1#2?x").unwrap().as_str(),
+            "https://api.github.com/repos/owner/repo/releases/tags/release%2Fv1%232%3Fx",
+        );
+    }
 }

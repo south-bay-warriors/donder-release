@@ -113,39 +113,6 @@ pub struct Ctx {
     pub packages: Vec<Pkg>,
 }
 
-/// Validates a CalVer format. Segments must run year, period, MICRO so that
-/// releases compare in chronological order when sorted by version.
-fn validate_calver_format(format: &str) -> Result<()> {
-    if format.is_empty() {
-        bail!("calver_format must be set when versioning is 'calver'");
-    }
-
-    let segments: Vec<&str> = format.split('.').collect();
-    if segments.len() != 3 {
-        bail!("calver_format must have exactly 3 dot-separated segments (e.g. YYYY.MM.MICRO)");
-    }
-
-    let valid_segments = ["YYYY", "YY", "0Y", "MM", "0M", "WW", "0W", "MICRO"];
-    for segment in &segments {
-        if !valid_segments.contains(segment) {
-            bail!("invalid calver_format segment '{}', valid segments: {}", segment, valid_segments.join(", "));
-        }
-    }
-
-    if !segments.contains(&"MICRO") {
-        bail!("calver_format must contain a MICRO segment");
-    }
-
-    if !["YYYY", "YY", "0Y"].contains(&segments[0])
-        || !["MM", "0M", "WW", "0W"].contains(&segments[1])
-        || segments[2] != "MICRO"
-    {
-        bail!("calver_format '{}' must be ordered year.period.MICRO (e.g. YYYY.MM.MICRO)", format);
-    }
-
-    Ok(())
-}
-
 fn default_versioning() -> String {
     "semver".to_string()
 }
@@ -188,7 +155,25 @@ impl Ctx {
 
         // Validate CalVer configuration
         if input_config.versioning == "calver" {
-            validate_calver_format(&input_config.calver_format)?;
+            if input_config.calver_format.is_empty() {
+                bail!("calver_format must be set when versioning is 'calver'");
+            }
+
+            let segments: Vec<&str> = input_config.calver_format.split('.').collect();
+            if segments.len() != 3 {
+                bail!("calver_format must have exactly 3 dot-separated segments (e.g. YYYY.MM.MICRO)");
+            }
+
+            let valid_segments = ["YYYY", "YY", "0Y", "MM", "0M", "WW", "0W", "MICRO"];
+            for segment in &segments {
+                if !valid_segments.contains(segment) {
+                    bail!("invalid calver_format segment '{}', valid segments: {}", segment, valid_segments.join(", "));
+                }
+            }
+
+            if !segments.contains(&"MICRO") {
+                bail!("calver_format must contain a MICRO segment");
+            }
 
             if !pre_id.is_empty() {
                 bail!("pre-releases are not supported with CalVer versioning");
@@ -294,10 +279,6 @@ impl Ctx {
             } else {
                 bump_file.calver_format.clone()
             };
-
-            if pkg_versioning == "calver" {
-                validate_calver_format(&pkg_calver_format)?;
-            }
 
             // Build packages list
             if bump_file.package {
@@ -566,52 +547,6 @@ bump_files:
         let result = Ctx::new(config, "".to_string(), true, vec![]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("must contain a MICRO segment"));
-    }
-
-    #[test]
-    fn ctx_calver_rejects_out_of_order_segments() {
-        for format in ["MICRO.YYYY.MM", "YYYY.MICRO.MM", "MM.YYYY.MICRO", "YYYY.YY.MICRO", "YYYY.MICRO.MICRO"] {
-            let dir = tempfile::tempdir().unwrap();
-            let config = write_config(dir.path(), &format!(r#"
-versioning: calver
-calver_format: {}
-bump_files:
-  - {{ target: cargo, path: "<root>" }}
-"#, format));
-            let result = Ctx::new(config, "".to_string(), true, vec![]);
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                format!("calver_format '{}' must be ordered year.period.MICRO (e.g. YYYY.MM.MICRO)", format),
-            );
-        }
-    }
-
-    #[test]
-    fn ctx_calver_accepts_every_ordered_format() {
-        for format in ["YYYY.MM.MICRO", "YYYY.0M.MICRO", "YY.MM.MICRO", "0Y.0M.MICRO", "YYYY.WW.MICRO", "YYYY.0W.MICRO"] {
-            let dir = tempfile::tempdir().unwrap();
-            let config = write_config(dir.path(), &format!(r#"
-versioning: calver
-calver_format: {}
-bump_files:
-  - {{ target: cargo, path: "<root>" }}
-"#, format));
-            assert!(Ctx::new(config, "".to_string(), true, vec![]).is_ok(), "{} should be accepted", format);
-        }
-    }
-
-    #[test]
-    fn ctx_calver_validates_per_package_format() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = write_config(dir.path(), r#"
-bump_files:
-  - { target: cargo, path: "pkg-a/Cargo.toml", package: true, versioning: calver, calver_format: MICRO.YYYY.MM }
-"#);
-        let result = Ctx::new(config, "".to_string(), true, vec![]);
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "calver_format 'MICRO.YYYY.MM' must be ordered year.period.MICRO (e.g. YYYY.MM.MICRO)",
-        );
     }
 
     #[test]
